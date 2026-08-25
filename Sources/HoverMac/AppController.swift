@@ -747,14 +747,28 @@ final class AppController {
         let showOverlay = calibrating || autoRanging || motionRecording || placingBounds || !hasXMap
         if !showOverlay {
             overlay.orderOut(nil)
-            return
+        } else {
+            overlay.orderFrontRegardless()
+            overlay.setInteractive(placingBounds)
+            overlay.overlayView.ballX = px
+            overlay.overlayView.boundL = yellowLeft()
+            overlay.overlayView.boundR = yellowRight()
+            overlay.overlayView.prompt = placingBounds ? "drag yellow bars to the real screen edges — saves automatically" : nil
+            overlay.overlayView.refresh()
         }
-        overlay.orderFrontRegardless()
-        overlay.setInteractive(placingBounds)
-        overlay.overlayView.ballX = px
-        overlay.overlayView.boundL = yellowLeft()
-        overlay.overlayView.boundR = yellowRight()
-        overlay.overlayView.prompt = placingBounds ? "drag yellow bars to the real screen edges — saves automatically" : nil
-        overlay.overlayView.refresh()
+        refreshPad()
+    }
+
+    /// Mirrors `RefreshPad()` — updates the embedded in-panel monitor, distinct
+    /// from the full-screen overlay (which only shows in specific states).
+    private func refreshPad() {
+        panel.padView.x = px
+        panel.padView.y = 0.5
+        panel.padView.yellowL = yellowLeft()
+        panel.padView.yellowR = yellowRight()
+        // Mirrors `CenterScreen01()`: yellow midpoint + fader offset, clamped.
+        let mid = (yellowLeft() + yellowRight()) / 2
+        panel.padView.centerX = clamp(mid + Double(settings.shift) / 100.0, 0, 1)
+        panel.padView.refresh()
     }
 }

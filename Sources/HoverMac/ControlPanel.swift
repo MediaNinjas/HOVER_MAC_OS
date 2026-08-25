@@ -96,11 +96,88 @@ private final class SectionBox: NSView {
     }
 }
 
+/// Embedded live-position monitor — port of Windows' `Pad` control (the small
+/// graph at the top of the panel, distinct from the full-screen `OverlayWindow`).
+/// Same visual language: grid crosshair, cyan frame, orange throw-triangle,
+/// yellow corridor bars, the ball, and a hot-pink edge line when pinned at 0/1.
+final class PadView: NSView {
+    var x: Double = 0.5
+    var y: Double = 0.5
+    var yellowL: Double = 0
+    var yellowR: Double = 1
+    var centerX: Double = 0.5
+
+    override var isFlipped: Bool { false } // bottom-left origin, matches Windows GDI+ Y-up math here.
+
+    func refresh() { setNeedsDisplay(bounds) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        NSColor(red: 6/255, green: 16/255, blue: 20/255, alpha: 1).setFill()
+        ctx.fill(bounds)
+
+        let w = bounds.width, h = bounds.height
+        let left: CGFloat = 10, top: CGFloat = 10
+        let right = w - 10, bottom = h - 10
+        let originX = left + CGFloat(clamp(centerX, 0, 1)) * (right - left)
+        let originY = bottom
+
+        let grid = NSColor(red: 0, green: 50/255, blue: 70/255, alpha: 1)
+        let hot = NSColor(red: 1, green: 220/255, blue: 80/255, alpha: 1)
+
+        ctx.setStrokeColor(grid.cgColor)
+        ctx.setLineWidth(1)
+        ctx.move(to: CGPoint(x: w / 2, y: 10)); ctx.addLine(to: CGPoint(x: w / 2, y: h - 10))
+        ctx.move(to: CGPoint(x: 10, y: h / 2)); ctx.addLine(to: CGPoint(x: w - 10, y: h / 2))
+        ctx.strokePath()
+
+        ctx.setStrokeColor(Neon.cyan.cgColor)
+        ctx.setLineWidth(1.5)
+        ctx.move(to: CGPoint(x: left, y: top)); ctx.addLine(to: CGPoint(x: right, y: top))
+        ctx.move(to: CGPoint(x: left, y: top)); ctx.addLine(to: CGPoint(x: left, y: bottom))
+        ctx.move(to: CGPoint(x: right, y: top)); ctx.addLine(to: CGPoint(x: right, y: bottom))
+        ctx.strokePath()
+
+        if x <= 0.02 || x >= 0.98 {
+            ctx.setStrokeColor(hot.cgColor)
+            ctx.setLineWidth(2.5)
+            let hx = x <= 0.02 ? left : right
+            ctx.move(to: CGPoint(x: hx, y: top)); ctx.addLine(to: CGPoint(x: hx, y: bottom))
+            ctx.strokePath()
+        }
+
+        let innerL = left + CGFloat(yellowL) * (right - left)
+        let innerR = left + CGFloat(yellowR) * (right - left)
+        let innerTop = top + (bottom - top) * 0.35
+
+        ctx.setStrokeColor(Neon.orange.cgColor)
+        ctx.setLineWidth(1.5)
+        ctx.move(to: CGPoint(x: originX, y: originY)); ctx.addLine(to: CGPoint(x: innerL, y: innerTop))
+        ctx.move(to: CGPoint(x: originX, y: originY)); ctx.addLine(to: CGPoint(x: innerR, y: innerTop))
+        ctx.move(to: CGPoint(x: innerL, y: innerTop)); ctx.addLine(to: CGPoint(x: innerR, y: innerTop))
+        ctx.strokePath()
+
+        if yellowR - yellowL > 0.04 {
+            ctx.setStrokeColor(hot.cgColor)
+            ctx.setLineWidth(2)
+            ctx.move(to: CGPoint(x: innerL, y: top)); ctx.addLine(to: CGPoint(x: innerL, y: bottom))
+            ctx.move(to: CGPoint(x: innerR, y: top)); ctx.addLine(to: CGPoint(x: innerR, y: bottom))
+            ctx.strokePath()
+        }
+
+        let bx = 12 + CGFloat(x) * (w - 24)
+        let by = 12 + CGFloat(y) * (h - 24)
+        ctx.setFillColor(Neon.cyan.cgColor)
+        ctx.fillEllipse(in: CGRect(x: bx - 5, y: by - 5, width: 10, height: 10))
+    }
+}
+
 /// The HOVER control window — mirrors the Windows form's MOTION + TOOLS + TUNE panels.
 final class ControlPanel: NSWindow {
     let statusLabel = NSTextField(labelWithString: "SEARCHING GRID")
     let readoutLabel = NSTextField(labelWithString: "X  ---")
     let monitorLabel = NSTextField(labelWithString: "MONITOR")
+    let padView = PadView()
 
     let recordBtn = NeonButton(title: "RECORD HAND MOVEMENT")
     let playBtn = NeonButton(title: "PLAY")
@@ -123,7 +200,7 @@ final class ControlPanel: NSWindow {
 
     init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 620),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 780),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -187,6 +264,13 @@ final class ControlPanel: NSWindow {
         header.alignment = .leading
         header.spacing = 2
 
+        padView.wantsLayer = true
+        padView.layer?.borderColor = Neon.borderCyan.withAlphaComponent(0.5).cgColor
+        padView.layer?.borderWidth = 1
+        padView.translatesAutoresizingMaskIntoConstraints = false
+        padView.widthAnchor.constraint(equalToConstant: 420).isActive = true
+        padView.heightAnchor.constraint(equalToConstant: 150).isActive = true
+
         // MOTION
         let motion = SectionBox("MOTION")
         motion.body.addArrangedSubview(recordBtn)
@@ -229,7 +313,7 @@ final class ControlPanel: NSWindow {
         monitorBtn.widthAnchor.constraint(equalToConstant: 100).isActive = true
 
         let root = NSStackView(views: [
-            header, readoutLabel,
+            header, padView, readoutLabel,
             motion, tools, tune, bottomRow
         ])
         root.orientation = .vertical
