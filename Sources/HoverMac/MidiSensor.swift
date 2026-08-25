@@ -6,6 +6,7 @@ import Foundation
 final class MidiSensor {
     private var client = MIDIClientRef()
     private var inPort = MIDIPortRef()
+    private var outPort = MIDIPortRef()
     private var connectedSources: [MIDIEndpointRef] = []
     private(set) var connected = false
     private(set) var status = "looking for sensor"
@@ -53,7 +54,49 @@ final class MidiSensor {
         status = connected
             ? (opened.count == 1 ? "live" : "live · \(opened.count) receivers")
             : "looking for sensor"
+
+        if connected { unmuteHotHands() }
         return connected
+    }
+
+    /// The Hot Hand receiver ships muted until something explicitly wakes it up over
+    /// its MIDI OUTPUT (destination) side — this was written on the Windows side
+    /// (`MidiInput.cs`'s `UnmuteHotHands`) but never actually wired into the live app
+    /// there either. Sends CC112=127 then CC102–111=127 on all 16 channels to every
+    /// MIDI destination whose name matches the Hot Hand, which is what actually starts
+    /// the sensor CC stream flowing.
+    private func unmuteHotHands() {
+        if outPort == 0 {
+            MIDIOutputPortCreate(client, "HOVER Out" as CFString, &outPort)
+        }
+        let count = MIDIGetNumberOfDestinations()
+        for i in 0..<count {
+            let dest = MIDIGetDestination(i)
+            var cfName: Unmanaged<CFString>?
+            MIDIObjectGetStringProperty(dest, kMIDIPropertyName, &cfName)
+            let name = (cfName?.takeRetainedValue() as String?) ?? ""
+            guard Self.isHotHand(name) else { continue }
+            for channel: UInt8 in 0..<16 {
+                send(cc: 112, value: 127, channel: channel, to: dest)
+                for cc: UInt8 in 102...111 {
+                    send(cc: cc, value: 127, channel: channel, to: dest)
+                }
+            }
+        }
+    }
+
+    private func send(cc: UInt8, value: UInt8, channel: UInt8, to destination: MIDIEndpointRef) {
+        var packetList = MIDIPacketList()
+        var bytes: [UInt8] = [0xB0 | channel, cc, value]
+        withUnsafeMutablePointer(to: &packetList) { listPtr in
+            var packetPtr = MIDIPacketListInit(listPtr)
+            packetPtr = MIDIPacketListAdd(listPtr, 1024, packetPtr, 0, bytes.count, &bytes)
+            _ = packetPtr
+            let status = MIDISend(outPort, destination, listPtr)
+            if status != noErr {
+                FileHandle.standardError.write("DEBUG MIDISend failed: \(status)\n".data(using: .utf8)!)
+            }
+        }
     }
 
     func disconnect() {
