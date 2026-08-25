@@ -1,8 +1,10 @@
 import AppKit
 
 /// Full-screen transparent overlay — port of Windows `Edges.cs`. Draws the corner
-/// brackets, throw guide, yellow corridor bars, and the ball, all in TRUE screen
-/// pixels (same space `CursorDriver` uses). Click-through when not interactive.
+/// brackets, throw guide, yellow corridor bars, and the ball — HOVER's own
+/// independent on-screen pointer, drawn here in true screen pixels. This never
+/// touches the real OS cursor; the real mouse/trackpad is completely separate,
+/// always. Click-through when not interactive.
 final class OverlayWindow: NSWindow {
     let overlayView = OverlayView()
 

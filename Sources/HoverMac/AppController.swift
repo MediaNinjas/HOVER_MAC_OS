@@ -2,6 +2,13 @@ import AppKit
 
 /// Orchestrates everything — direct port of `HoverForm.cs`'s state machine and
 /// `Tick()` loop. X-axis only (Y stays muted, matching `EnableY = false` on Windows).
+///
+/// Deliberate divergence from Windows: HOVER never drives the real OS cursor here.
+/// It only moves its own on-screen pointer (the ball, drawn in `OverlayWindow`/
+/// `ControlPanel`'s `padView`). Your real mouse/trackpad is a fully independent
+/// pointer at all times — HOVER can't take it over, fight it, or be affected by it,
+/// full stop, regardless of app state. This is intentional per explicit direction
+/// after an earlier build warped the real cursor and locked out trackpad input.
 final class AppController {
     let sensor = MidiSensor()
     let panel = ControlPanel()
@@ -16,12 +23,11 @@ final class AppController {
     private var rawX = 64
     private var centerX = 64.0
     private var px = 0.5
+    /// MUTE freezes HOVER's own ball/pointer (stops updating from hand data). It has
+    /// nothing to do with the real OS cursor — HOVER never touches that, ever. Two
+    /// fully independent pointers: yours (mouse/trackpad) and HOVER's own on-screen
+    /// ball, at all times, regardless of HOVER's state.
     private var muted = false
-    private var lastDrivenPoint: CGPoint?
-    /// Mirrors Windows' `_mouseUntil` — after a real mouse move is detected, HOVER
-    /// stays hands-off for a grace window even once MUTE is toggled off again, and
-    /// is reset the instant MUTE is pressed (`YieldToRealMouse` / `DriveCursor`).
-    private var mouseUntil = Date.distantPast
     private var syncing = false
 
     // CENTER (rest-pose capture).
@@ -67,6 +73,12 @@ final class AppController {
     private var notice: String?
     private var noticeUntil = Date.distantPast
     private var keyMonitor: Any?
+    private var globalKeyMonitor: Any?
+    /// Hard kill switch: press F12 twice within 600ms to force-terminate the whole
+    /// process instantly, regardless of app state. This exists independent of the
+    /// MUTE/yield-to-mouse logic on purpose — it must work even if something else in
+    /// the app is misbehaving and fighting the real trackpad/mouse.
+    private var lastF12Press = Date.distantPast
 
     var hasXMap: Bool { settings.axisMapped && abs(settings.axisRight - settings.axisLeft) >= 6 }
 
@@ -79,7 +91,13 @@ final class AppController {
 
         sensor.onSample = { [weak self] x in self?.rawX = x }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
-            self?.handleKey(event) ?? event
+            self?.checkForceKill(event)
+            return self?.handleKey(event) ?? event
+        }
+        // Global monitor too — the force-kill must work even if HOVER's own window
+        // isn't focused (e.g. the cursor is stuck over some other app).
+        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            self?.checkForceKill(event)
         }
         timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             self?.tick()
@@ -216,6 +234,20 @@ final class AppController {
     @objc private func onAutoTapped() { autoRanging ? cancelAuto() : startAuto() }
     @objc private func onMapTapped() { calibrating ? cancelCalib() : startCalib() }
 
+    // MARK: - Force kill (F12 F12)
+
+    /// F12 twice within 600ms = immediate hard exit. No mute, no cleanup, no "are
+    /// you sure" — the whole point is this works even if the rest of the app is
+    /// unresponsive or fighting the user's real input.
+    private func checkForceKill(_ event: NSEvent) {
+        guard event.keyCode == 111 else { return } // F12
+        let now = Date()
+        if now.timeIntervalSince(lastF12Press) < 0.6 {
+            exit(0)
+        }
+        lastF12Press = now
+    }
+
     // MARK: - Key handling (MAP confirm/cancel, AUTO confirm/cancel)
 
     private func handleKey(_ event: NSEvent) -> NSEvent? {
@@ -262,43 +294,12 @@ final class AppController {
         mapCalibrateThrow(raw)
     }
 
-    private func driveCursor() {
-        if muted || calibrating || autoRanging { return }
-        if Date() < mouseUntil { return }
-        let point = CursorDriver.drive(x01: px, on: targetScreen)
-        lastDrivenPoint = point
-    }
+    private func toggleMute() { muteHover(!muted) }
 
-    /// Real mouse activity: release OS cursor now and keep HOVER muted until MUTE is
-    /// pressed. Mirrors `YieldToRealMouse` — sets a 3s grace window on top of the mute
-    /// so HOVER doesn't immediately snap the cursor back even the instant it's unmuted.
-    private func yieldToRealMouse() {
-        mouseUntil = Date().addingTimeInterval(3)
-        if !muted { muteHover(true, fromMouse: true) }
-    }
-
-    /// If the OS cursor moved without us driving it, the user grabbed the real mouse —
-    /// mute so we don't fight them (mirrors `DetectPhysicalMouseMove`).
-    private func detectPhysicalMouseMove() {
-        guard let last = lastDrivenPoint, !muted else { return }
-        let now = CursorDriver.currentLocationTopLeft()
-        if abs(now.x - last.x) > 3 || abs(now.y - last.y) > 3 {
-            yieldToRealMouse()
-        }
-    }
-
-    private func toggleMute() { muteHover(!muted, fromMouse: false) }
-
-    private func muteHover(_ value: Bool, fromMouse: Bool) {
-        let was = muted
+    private func muteHover(_ value: Bool) {
         muted = value
         panel.muteBtn.title = muted ? "MUTED" : "MUTE"
-        if !muted { mouseUntil = Date.distantPast }
-        if fromMouse && value && !was {
-            show("mouse has control · press MUTE to give HOVER the cursor again")
-        } else {
-            show(muted ? "MUTED" : "LIVE")
-        }
+        show(muted ? "MUTED" : "LIVE")
     }
 
     // MARK: - CENTER
@@ -447,7 +448,6 @@ final class AppController {
             px = clamp(Geometry.corridorMappedX(midi: horizontalOf(rawX), motionMin: motionMin, motionMax: motionMax, screenL: yellowL, screenR: yellowR), min(yellowL, yellowR), max(yellowL, yellowR))
         }
         refreshOverlay()
-        driveCursor()
     }
 
     // MARK: - PLAY
@@ -573,7 +573,6 @@ final class AppController {
         // than left as the raw sweep min/max.
         recenterPan()
         map(rawX)
-        driveCursor()
         show("x edge range locked · range \(settings.range)")
     }
 
@@ -635,7 +634,6 @@ final class AppController {
         cancelCalib()
         recenterPan()
         map(rawX)
-        driveCursor()
         show("mapped · left/right edges locked")
     }
 
@@ -660,7 +658,6 @@ final class AppController {
                 centerX = centerSumX / Double(centerCount)
                 centering = false
                 recenterPan()
-                _ = CursorDriver.drive(x01: 0.5, on: targetScreen)
             }
             showStatus()
             refreshOverlay()
@@ -691,9 +688,10 @@ final class AppController {
             return
         }
 
-        detectPhysicalMouseMove()
-
-        if !wallDragging {
+        // MUTE freezes HOVER's own ball in place — it does not touch the real
+        // cursor either way (that's never touched), it just stops updating from
+        // hand data.
+        if !wallDragging && !muted {
             if placingBounds && !motionRecording && motionMax - motionMin >= 6 {
                 // Review phase (after SAVE, before/while dragging): live hand mapped
                 // straight through the current yellow corridor — no smoothing. Drag a
@@ -703,8 +701,6 @@ final class AppController {
                 map(rawX)
             }
         }
-
-        driveCursor()
 
         showStatus()
         refreshOverlay()
