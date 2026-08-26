@@ -18,6 +18,8 @@ final class AppController {
     private var timer: Timer?
     private var targetScreenIndex = 0
     private var overlayScreenName: String?
+    private var leftHandle: DragHandleWindow?
+    private var rightHandle: DragHandleWindow?
 
     // Pointer state.
     private var rawX = 64
@@ -137,15 +139,25 @@ final class AppController {
         // nil comparison could skip recreating the overlay on a real monitor switch.
         if overlay == nil || overlayScreenName != screenName(screen) {
             overlay?.orderOut(nil)
+            leftHandle?.orderOut(nil)
+            rightHandle?.orderOut(nil)
             let ov = OverlayWindow(screen: screen)
             overlayScreenName = screenName(screen)
-            ov.overlayView.onBoundsDragStarted = { [weak self] in self?.wallDragging = true }
-            ov.overlayView.onBoundsDragged = { [weak self] l, r in self?.onBoundsDragged(l, r) }
-            ov.overlayView.onBoundsDragEnded = { [weak self] in
-                self?.wallDragging = false
-                if self?.placingBounds == true { self?.autoSaveCorridor() }
-            }
             overlay = ov
+
+            // Two independent small handles — dragging one never touches the other's
+            // position. No mirroring: each bar is its own value, moved on its own.
+            let left = DragHandleWindow(screen: screen)
+            left.onDragStarted = { [weak self] in self?.wallDragging = true }
+            left.onDragged = { [weak self] x01 in self?.onLeftBarDragged(x01) }
+            left.onDragEnded = { [weak self] in self?.onBarDragEnded() }
+            leftHandle = left
+
+            let right = DragHandleWindow(screen: screen)
+            right.onDragStarted = { [weak self] in self?.wallDragging = true }
+            right.onDragged = { [weak self] x01 in self?.onRightBarDragged(x01) }
+            right.onDragEnded = { [weak self] in self?.onBarDragEnded() }
+            rightHandle = right
         }
     }
 
@@ -440,14 +452,32 @@ final class AppController {
         syncing = false
     }
 
-    private func onBoundsDragged(_ left: Double, _ right: Double) {
+    // Two bars, fully independent — dragging one never moves the other. A tiny
+    /// minimum gap just stops them from crossing entirely; nothing else is coupled.
+    private static let minBarGap = 0.02
+
+    private func onLeftBarDragged(_ x01: Double) {
         guard placingBounds else { return }
-        yellowL = left
-        yellowR = right
+        yellowL = min(x01, yellowR - Self.minBarGap)
+        updateBallDuringDrag()
+    }
+
+    private func onRightBarDragged(_ x01: Double) {
+        guard placingBounds else { return }
+        yellowR = max(x01, yellowL + Self.minBarGap)
+        updateBallDuringDrag()
+    }
+
+    private func updateBallDuringDrag() {
         if motionMax - motionMin >= 6 {
             px = clamp(Geometry.corridorMappedX(midi: horizontalOf(rawX), motionMin: motionMin, motionMax: motionMax, screenL: yellowL, screenR: yellowR), min(yellowL, yellowR), max(yellowL, yellowR))
         }
         refreshOverlay()
+    }
+
+    private func onBarDragEnded() {
+        wallDragging = false
+        if placingBounds { autoSaveCorridor() }
     }
 
     // MARK: - PLAY
@@ -746,13 +776,17 @@ final class AppController {
             overlay.orderOut(nil)
         } else {
             overlay.orderFrontRegardless()
-            overlay.setInteractive(placingBounds)
+            overlay.overlayView.interactive = placingBounds
             overlay.overlayView.ballX = px
             overlay.overlayView.boundL = yellowLeft()
             overlay.overlayView.boundR = yellowRight()
             overlay.overlayView.prompt = placingBounds ? "drag yellow bars to the real screen edges — saves automatically" : nil
             overlay.overlayView.refresh()
         }
+        // The two small drag handles — only ever clickable (and only ever this small
+        // fixed size) while actually in the drag-to-edge review step.
+        leftHandle?.update(x01: yellowLeft(), visible: placingBounds)
+        rightHandle?.update(x01: yellowRight(), visible: placingBounds)
         refreshPad()
     }
 
