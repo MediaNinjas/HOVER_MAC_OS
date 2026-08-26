@@ -458,19 +458,20 @@ final class AppController {
         syncing = false
     }
 
-    // Two bars, fully independent — dragging one never moves the other. A tiny
-    /// minimum gap just stops them from crossing entirely; nothing else is coupled.
-    private static let minBarGap = 0.02
-
+    // Two bars, fully independent — dragging one never moves the other, and
+    /// neither has any resistance/clamp against the other's position. They can
+    /// cross entirely; every downstream use of yellowL/yellowR already sorts with
+    /// min()/max(), so crossing is harmless. No "push back" of any kind, ever —
+    /// each bar goes exactly where the mouse is, full stop.
     private func onLeftBarDragged(_ x01: Double) {
         wallDragging = true
-        yellowL = min(x01, yellowR - Self.minBarGap)
+        yellowL = x01
         updateBallDuringDrag()
     }
 
     private func onRightBarDragged(_ x01: Double) {
         wallDragging = true
-        yellowR = max(x01, yellowL + Self.minBarGap)
+        yellowR = x01
         updateBallDuringDrag()
     }
 

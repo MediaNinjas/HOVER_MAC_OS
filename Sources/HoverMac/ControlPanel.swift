@@ -125,6 +125,12 @@ final class PadView: NSView {
     var onRightBarDragged: ((Double) -> Void)?
     var onBarDragEnded: (() -> Void)?
 
+    /// Without this, the FIRST click on a bar when the window isn't already key
+    /// just activates the window instead of starting a real drag — the click gets
+    /// silently eaten. That's exactly the kind of "won't let me grab it" behavior
+    /// that read as the app fighting the mouse. Always treat clicks here as real.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     private let inset: CGFloat = 10
     private let grabPt: CGFloat = 14
     private var dragging = 0 // 0 none, 1 left, 2 right
