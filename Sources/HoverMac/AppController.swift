@@ -282,18 +282,22 @@ final class AppController {
     }
 
     /// Pre-map full-screen throw from rest center — same curve before and during calibrate.
+    /// No smoothing here either, for the same reason as `map()` below — direct,
+    /// nothing lags or eases toward the target.
     private func mapCalibrateThrow(_ raw: Int) {
         var dx = Double(raw) - centerX
         if settings.flipX { dx = -dx }
         let reach = max(8, settings.throwReach)
-        let targetX = clamp(0.5 + Geometry.axis(dx, reach: reach), 0, 1)
-        let alpha = clamp(1.0 - Double(settings.smooth) / 100.0, 0.04, 1)
-        px = px + (targetX - px) * alpha
+        px = clamp(0.5 + Geometry.axis(dx, reach: reach), 0, 1)
     }
 
     /// Normal live mapping — mirrors `Map()`.
+    /// 1:1, no smoothing/easing/lag of any kind — direct clamp, same as the
+    /// corridor-review path. Explicitly NOT a spring/delay toward the target;
+    /// per direction, nothing touches the ball's motion except the hard stop at
+    /// either bar. A "delay" control may be added later, but only as an explicit
+    /// opt-in, never as always-on default behavior.
     private func map(_ raw: Int) {
-        let alpha = clamp(1.0 - Double(settings.smooth) / 100.0, 0.04, 1)
         if hasXMap {
             let targetX = Geometry.mappedX(
                 midi: horizontalOf(raw),
@@ -302,7 +306,7 @@ final class AppController {
             var l = clamp(settings.screenBoundLeft, 0, 1)
             var r = clamp(settings.screenBoundRight, 0, 1)
             if r < l { swap(&l, &r) }
-            px = clamp(px + (targetX - px) * alpha, l, r)
+            px = clamp(targetX, l, r)
             return
         }
         mapCalibrateThrow(raw)
