@@ -772,7 +772,9 @@ final class AppController {
             else if hasXMap { panel.statusLabel.stringValue = "MAPPED" }
             else { panel.statusLabel.stringValue = "READY" }
         }
-        panel.readoutLabel.stringValue = "X  \(rawX)     Y  MUTE"
+        let lPct = Int((yellowL * 100).rounded())
+        let rPct = Int((yellowR * 100).rounded())
+        panel.readoutLabel.stringValue = "X  \(rawX)     Y  MUTE     L\(lPct)% R\(rPct)%"
         panel.monitorLabel.stringValue = "MONITOR \(targetScreenIndex + 1)/\(NSScreen.screens.count)"
     }
 
