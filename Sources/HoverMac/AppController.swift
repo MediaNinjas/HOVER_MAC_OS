@@ -90,6 +90,11 @@ final class AppController {
         NSApp.activate(ignoringOtherApps: true)
 
         sensor.onSample = { [weak self] x in self?.rawX = x }
+        sensor.onDevicesChanged = { [weak self] in
+            guard let self else { return }
+            panel.setDevices(sensor.devices)
+        }
+        panel.setDevices(sensor.devices) // empty list initially, filled in on first rescan
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             self?.checkForceKill(event)
             return self?.handleKey(event) ?? event
@@ -178,6 +183,11 @@ final class AppController {
         panel.monitorBtn.action = #selector(onMonitorTapped)
         panel.flipXCheck.target = self
         panel.flipXCheck.action = #selector(onFlipXChanged)
+        panel.rescanBtn.target = self
+        panel.rescanBtn.action = #selector(onRescanTapped)
+        panel.onDeviceToggled = { [weak self] name, enabled in
+            self?.sensor.setDevice(name, enabled: enabled)
+        }
 
         panel.smoothSlider.integerValue = settings.smooth
         panel.throwSlider.integerValue = settings.throwReach
@@ -226,6 +236,10 @@ final class AppController {
     }
     @objc private func onMuteTapped() { toggleMute() }
     @objc private func onMonitorTapped() { switchMonitor() }
+    @objc private func onRescanTapped() {
+        sensor.rescan()
+        showStatus()
+    }
     @objc private func onCenterTapped() {
         if placingBounds || hasXMap { setCenterFromHand() } else { beginCenter() }
     }

@@ -1,22 +1,48 @@
 import CoreMIDI
 import Foundation
 
+/// One row in the DEVICES list — a MIDI source CoreMIDI can see, and whether the
+/// user wants HOVER listening to it.
+struct MidiDeviceInfo {
+    let name: String
+    var enabled: Bool
+}
+
 /// Reads the Hot Hand's CC7/4/9 (X axis) over CoreMIDI. Y (CC5/8) is intentionally
 /// ignored — this mirrors the Windows build's `EnableY = false` (X-only pass).
+///
+/// Lists every MIDI source it can see (not just ones that look like a Hot Hand),
+/// so the DEVICES panel can show all of them with an on/off checkbox each. A
+/// device whose name looks like a Hot Hand is enabled by default the first time
+/// it's ever seen; anything else defaults off. The user's explicit choice always
+/// wins after that — rescanning never silently re-enables something they turned
+/// off, and never silently disables something they turned on.
 final class MidiSensor {
     private var client = MIDIClientRef()
     private var inPort = MIDIPortRef()
     private var outPort = MIDIPortRef()
-    private var connectedSources: [MIDIEndpointRef] = []
+
+    private var allSources: [(name: String, endpoint: MIDIEndpointRef)] = []
+    private var enabledNames: Set<String> = []
+    private var seenNames: Set<String> = []
+    private var connectedNames: Set<String> = []
+
     private(set) var connected = false
     private(set) var status = "looking for sensor"
 
     /// Latest raw X value, 0...127.
     private(set) var lastX: Int = 64
     var onSample: ((Int) -> Void)?
+    /// Fires whenever the device list or any device's enabled state changes, so the
+    /// UI can rebuild the DEVICES checkbox list.
+    var onDevicesChanged: (() -> Void)?
 
     private var lastSampleAt = Date.distantPast
     private var lastUnmuteAt = Date.distantPast
+
+    var devices: [MidiDeviceInfo] {
+        allSources.map { MidiDeviceInfo(name: $0.name, enabled: enabledNames.contains($0.name)) }
+    }
 
     private static func isHotHand(_ name: String) -> Bool {
         let compact = name.replacingOccurrences(of: " ", with: "")
@@ -24,13 +50,11 @@ final class MidiSensor {
             || name.range(of: "Source Audio", options: .caseInsensitive) != nil
     }
 
-    func connect() -> Bool {
-        if connected { return true }
-
+    private func ensureClientAndPorts() {
         if client == 0 {
             MIDIClientCreateWithBlock("HOVER" as CFString, &client) { [weak self] _ in
-                // Device (dis)connect notifications — re-scan on next tick via `connect()`.
-                _ = self
+                // Device (dis)connect notifications — rescan so the list stays current.
+                DispatchQueue.main.async { self?.rescan() }
             }
         }
         if inPort == 0 {
@@ -38,32 +62,67 @@ final class MidiSensor {
                 self?.handle(packetList)
             }
         }
+    }
 
+    /// Re-enumerate every MIDI source CoreMIDI currently sees and reapply each
+    /// device's enabled state. Also used as the initial connect.
+    @discardableResult
+    func rescan() -> Bool {
+        ensureClientAndPorts()
+        var found: [(String, MIDIEndpointRef)] = []
         let count = MIDIGetNumberOfSources()
-        var opened: [MIDIEndpointRef] = []
         for i in 0..<count {
             let source = MIDIGetSource(i)
             var cfName: Unmanaged<CFString>?
             MIDIObjectGetStringProperty(source, kMIDIPropertyName, &cfName)
-            let name = (cfName?.takeRetainedValue() as String?) ?? ""
-            guard Self.isHotHand(name) else { continue }
-            if MIDIPortConnectSource(inPort, source, nil) == noErr {
-                opened.append(source)
+            let name = (cfName?.takeRetainedValue() as String?) ?? "MIDI \(i)"
+            found.append((name, source))
+            if !seenNames.contains(name) {
+                seenNames.insert(name)
+                if Self.isHotHand(name) { enabledNames.insert(name) }
             }
         }
+        allSources = found
+        applyConnections()
+        onDevicesChanged?()
+        return connected
+    }
 
-        connectedSources = opened
-        connected = !opened.isEmpty
+    /// Explicit user toggle from the DEVICES list — always wins over auto-detection.
+    func setDevice(_ name: String, enabled: Bool) {
+        if enabled { enabledNames.insert(name) } else { enabledNames.remove(name) }
+        applyConnections()
+        onDevicesChanged?()
+    }
+
+    private func applyConnections() {
+        for (name, endpoint) in allSources {
+            let shouldConnect = enabledNames.contains(name)
+            let isConnected = connectedNames.contains(name)
+            if shouldConnect && !isConnected {
+                if MIDIPortConnectSource(inPort, endpoint, nil) == noErr {
+                    connectedNames.insert(name)
+                }
+            } else if !shouldConnect && isConnected {
+                MIDIPortDisconnectSource(inPort, endpoint)
+                connectedNames.remove(name)
+            }
+        }
+        let wasConnected = connected
+        connected = !connectedNames.isEmpty
         status = connected
-            ? (opened.count == 1 ? "live" : "live · \(opened.count) receivers")
+            ? (connectedNames.count == 1 ? "live" : "live · \(connectedNames.count) receivers")
             : "looking for sensor"
-
-        if connected {
+        if connected && !wasConnected {
             unmuteHotHands()
             lastSampleAt = Date() // grace period before the first keepAlive check
         }
-        return connected
     }
+
+    /// Kept for the existing call sites that just want "make sure something is
+    /// connected" — equivalent to a rescan.
+    @discardableResult
+    func connect() -> Bool { rescan() }
 
     /// Call this on every tick while connected. The receiver appears to mute itself
     /// again after a period without traffic (a wireless power-saving behavior) —
@@ -111,20 +170,8 @@ final class MidiSensor {
             var packetPtr = MIDIPacketListInit(listPtr)
             packetPtr = MIDIPacketListAdd(listPtr, 1024, packetPtr, 0, bytes.count, &bytes)
             _ = packetPtr
-            let status = MIDISend(outPort, destination, listPtr)
-            if status != noErr {
-                FileHandle.standardError.write("DEBUG MIDISend failed: \(status)\n".data(using: .utf8)!)
-            }
+            _ = MIDISend(outPort, destination, listPtr)
         }
-    }
-
-    func disconnect() {
-        for source in connectedSources {
-            MIDIPortDisconnectSource(inPort, source)
-        }
-        connectedSources.removeAll()
-        connected = false
-        status = "looking for sensor"
     }
 
     private func handle(_ packetList: UnsafePointer<MIDIPacketList>) {

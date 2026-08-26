@@ -14,6 +14,16 @@ private func mono(_ size: CGFloat, bold: Bool = false) -> NSFont {
     NSFont.monospacedSystemFont(ofSize: size, weight: bold ? .bold : .regular)
 }
 
+/// Plain `NSButton(checkboxWithTitle:)` titles default to a system label color that
+/// is effectively invisible against this app's black background (no contrast) —
+/// every checkbox needs its title set explicitly like this, not just `.font`.
+private func checkboxTitle(_ text: String) -> NSAttributedString {
+    NSAttributedString(string: text, attributes: [
+        .font: mono(10),
+        .foregroundColor: Neon.dimCyan
+    ])
+}
+
 /// A flat, bordered, cyan-on-black button matching Windows' `StyleButton`.
 final class NeonButton: NSButton {
     private let border = CALayer()
@@ -241,9 +251,15 @@ final class ControlPanel: NSWindow {
     let rangeValue = NSTextField(labelWithString: "40")
     let shiftValue = NSTextField(labelWithString: "0")
 
+    let rescanBtn = NeonButton(title: "RESCAN")
+    private let devicesBox = SectionBox("DEVICES")
+    private var deviceRows: [NSView] = []
+    /// (device name, enabled) whenever a checkbox is toggled by the user.
+    var onDeviceToggled: ((String, Bool) -> Void)?
+
     init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 780),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 900),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -346,8 +362,7 @@ final class ControlPanel: NSWindow {
         tune.body.distribution = .fill
         tune.body.addArrangedSubview(tuneStack)
 
-        flipXCheck.font = mono(10)
-        flipXCheck.contentTintColor = Neon.dimCyan
+        flipXCheck.attributedTitle = checkboxTitle("FLIP X")
         flipXCheck.state = .on
 
         let bottomRow = NSStackView(views: [flipXCheck, monitorBtn])
@@ -355,9 +370,20 @@ final class ControlPanel: NSWindow {
         bottomRow.spacing = 14
         monitorBtn.widthAnchor.constraint(equalToConstant: 100).isActive = true
 
+        // DEVICES — every MIDI source CoreMIDI sees, each with its own on/off
+        // checkbox, plus a manual rescan. Rebuilt live via `setDevices`.
+        rescanBtn.widthAnchor.constraint(equalToConstant: 90).isActive = true
+        devicesBox.body.orientation = .vertical
+        devicesBox.body.alignment = .leading
+        devicesBox.body.distribution = .fill
+        devicesBox.body.spacing = 4
+        let devicesHeaderRow = NSStackView(views: [rescanBtn])
+        devicesHeaderRow.orientation = .horizontal
+        devicesBox.body.addArrangedSubview(devicesHeaderRow)
+
         let root = NSStackView(views: [
             header, padView, readoutLabel,
-            motion, tools, tune, bottomRow
+            motion, tools, tune, devicesBox, bottomRow
         ])
         root.orientation = .vertical
         root.alignment = .leading
@@ -365,7 +391,7 @@ final class ControlPanel: NSWindow {
         root.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 16, right: 20)
         root.translatesAutoresizingMaskIntoConstraints = false
 
-        for section in [motion, tools, tune] {
+        for section in [motion, tools, tune, devicesBox] {
             section.translatesAutoresizingMaskIntoConstraints = false
             section.widthAnchor.constraint(equalToConstant: 420).isActive = true
         }
@@ -378,5 +404,60 @@ final class ControlPanel: NSWindow {
         ])
 
         playBtn.isEnabled = false
+    }
+
+    /// Rebuilds the DEVICES checkbox list to match `devices` exactly. Cheap enough
+    /// to call on every rescan/device-change — this list is never long.
+    func setDevices(_ devices: [MidiDeviceInfo]) {
+        for row in deviceRows { row.removeFromSuperview() }
+        deviceRows.removeAll()
+
+        if devices.isEmpty {
+            let empty = NSTextField(labelWithString: "no MIDI devices found")
+            empty.font = mono(10)
+            empty.textColor = Neon.dimCyan
+            devicesBox.body.addArrangedSubview(empty)
+            deviceRows.append(empty)
+            return
+        }
+
+        for device in devices {
+            let row = DeviceCheckboxRow(name: device.name, enabled: device.enabled)
+            row.onToggle = { [weak self] enabled in
+                self?.onDeviceToggled?(device.name, enabled)
+            }
+            devicesBox.body.addArrangedSubview(row)
+            deviceRows.append(row)
+        }
+    }
+}
+
+/// One row in the DEVICES list: a checkbox plus the device's name, reporting
+/// toggles via a closure (plain `NSButton` target/action can't carry one).
+final class DeviceCheckboxRow: NSView {
+    var onToggle: ((Bool) -> Void)?
+    private let checkbox: NSButton
+
+    init(name: String, enabled: Bool) {
+        checkbox = NSButton(checkboxWithTitle: name, target: nil, action: nil)
+        super.init(frame: .zero)
+        checkbox.attributedTitle = checkboxTitle(name)
+        checkbox.state = enabled ? .on : .off
+        checkbox.target = self
+        checkbox.action = #selector(handleToggle)
+        checkbox.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(checkbox)
+        NSLayoutConstraint.activate([
+            checkbox.leadingAnchor.constraint(equalTo: leadingAnchor),
+            checkbox.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            checkbox.topAnchor.constraint(equalTo: topAnchor),
+            checkbox.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    @objc private func handleToggle() {
+        onToggle?(checkbox.state == .on)
     }
 }
