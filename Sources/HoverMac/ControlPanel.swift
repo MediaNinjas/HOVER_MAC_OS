@@ -107,9 +107,52 @@ final class PadView: NSView {
     var yellowR: Double = 1
     var centerX: Double = 0.5
 
+    /// Dragging these bars works identically no matter what mode/state the rest of
+    /// the app is in — there is no "enter calibrate mode" toggle here on purpose.
+    /// Ordinary in-window dragging (no full-screen tricks, no click-through games),
+    /// so it can never affect anything outside this small view.
+    var onLeftBarDragged: ((Double) -> Void)?
+    var onRightBarDragged: ((Double) -> Void)?
+    var onBarDragEnded: (() -> Void)?
+
+    private let inset: CGFloat = 10
+    private let grabPt: CGFloat = 14
+    private var dragging = 0 // 0 none, 1 left, 2 right
+
     override var isFlipped: Bool { false } // bottom-left origin, matches Windows GDI+ Y-up math here.
 
     func refresh() { setNeedsDisplay(bounds) }
+
+    private func x01(for pointInView: NSPoint) -> Double {
+        let left = inset, right = bounds.width - inset
+        return Double(clamp(Double((pointInView.x - left) / max(1, right - left)), 0, 1))
+    }
+
+    private func barScreenX(_ x01: Double) -> CGFloat {
+        let left = inset, right = bounds.width - inset
+        return left + CGFloat(x01) * (right - left)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        let sL = barScreenX(yellowL)
+        let sR = barScreenX(yellowR)
+        if abs(p.x - sL) <= grabPt { dragging = 1 }
+        else if abs(p.x - sR) <= grabPt { dragging = 2 }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard dragging != 0 else { return }
+        let p = convert(event.locationInWindow, from: nil)
+        let v = x01(for: p)
+        if dragging == 1 { onLeftBarDragged?(v) } else { onRightBarDragged?(v) }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard dragging != 0 else { return }
+        dragging = 0
+        onBarDragEnded?()
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }

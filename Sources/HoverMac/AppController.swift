@@ -18,8 +18,6 @@ final class AppController {
     private var timer: Timer?
     private var targetScreenIndex = 0
     private var overlayScreenName: String?
-    private var leftHandle: DragHandleWindow?
-    private var rightHandle: DragHandleWindow?
 
     // Pointer state.
     private var rawX = 64
@@ -46,7 +44,7 @@ final class AppController {
     private var playIndex = 0
     private var motionMin = 127.0
     private var motionMax = 0.0
-    private var placingBounds = false // review mode: yellow bars visible + draggable
+    private var placingBounds = false // review mode: bars shown as the live corridor (not the saved map). The bars in the panel's pad are always draggable regardless of this.
     private var wallDragging = false
     private var yellowL = 0.0
     private var yellowR = 1.0
@@ -139,25 +137,9 @@ final class AppController {
         // nil comparison could skip recreating the overlay on a real monitor switch.
         if overlay == nil || overlayScreenName != screenName(screen) {
             overlay?.orderOut(nil)
-            leftHandle?.orderOut(nil)
-            rightHandle?.orderOut(nil)
             let ov = OverlayWindow(screen: screen)
             overlayScreenName = screenName(screen)
             overlay = ov
-
-            // Two independent small handles — dragging one never touches the other's
-            // position. No mirroring: each bar is its own value, moved on its own.
-            let left = DragHandleWindow(screen: screen)
-            left.onDragStarted = { [weak self] in self?.wallDragging = true }
-            left.onDragged = { [weak self] x01 in self?.onLeftBarDragged(x01) }
-            left.onDragEnded = { [weak self] in self?.onBarDragEnded() }
-            leftHandle = left
-
-            let right = DragHandleWindow(screen: screen)
-            right.onDragStarted = { [weak self] in self?.wallDragging = true }
-            right.onDragged = { [weak self] x01 in self?.onRightBarDragged(x01) }
-            right.onDragEnded = { [weak self] in self?.onBarDragEnded() }
-            rightHandle = right
         }
     }
 
@@ -174,6 +156,12 @@ final class AppController {
     // MARK: - UI wiring
 
     private func wireUI() {
+        // The pad's yellow bars are draggable directly in the app's own window,
+        // always — same behavior no matter what mode HOVER is in.
+        panel.padView.onLeftBarDragged = { [weak self] x01 in self?.onLeftBarDragged(x01) }
+        panel.padView.onRightBarDragged = { [weak self] x01 in self?.onRightBarDragged(x01) }
+        panel.padView.onBarDragEnded = { [weak self] in self?.onBarDragEnded() }
+
         panel.recordBtn.target = self
         panel.recordBtn.action = #selector(onRecordTapped)
         panel.playBtn.target = self
@@ -457,13 +445,13 @@ final class AppController {
     private static let minBarGap = 0.02
 
     private func onLeftBarDragged(_ x01: Double) {
-        guard placingBounds else { return }
+        wallDragging = true
         yellowL = min(x01, yellowR - Self.minBarGap)
         updateBallDuringDrag()
     }
 
     private func onRightBarDragged(_ x01: Double) {
-        guard placingBounds else { return }
+        wallDragging = true
         yellowR = max(x01, yellowL + Self.minBarGap)
         updateBallDuringDrag()
     }
@@ -477,7 +465,7 @@ final class AppController {
 
     private func onBarDragEnded() {
         wallDragging = false
-        if placingBounds { autoSaveCorridor() }
+        autoSaveCorridor()
     }
 
     // MARK: - PLAY
@@ -776,17 +764,12 @@ final class AppController {
             overlay.orderOut(nil)
         } else {
             overlay.orderFrontRegardless()
-            overlay.overlayView.interactive = placingBounds
             overlay.overlayView.ballX = px
             overlay.overlayView.boundL = yellowLeft()
             overlay.overlayView.boundR = yellowRight()
-            overlay.overlayView.prompt = placingBounds ? "drag yellow bars to the real screen edges — saves automatically" : nil
+            overlay.overlayView.prompt = placingBounds ? "drag the yellow bars in the app's own graph to adjust" : nil
             overlay.overlayView.refresh()
         }
-        // The two small drag handles — only ever clickable (and only ever this small
-        // fixed size) while actually in the drag-to-edge review step.
-        leftHandle?.update(x01: yellowLeft(), visible: placingBounds)
-        rightHandle?.update(x01: yellowRight(), visible: placingBounds)
         refreshPad()
     }
 
