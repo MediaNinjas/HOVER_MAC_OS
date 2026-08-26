@@ -301,16 +301,21 @@ final class AppController {
     /// per direction, nothing touches the ball's motion except the hard stop at
     /// either bar. A "delay" control may be added later, but only as an explicit
     /// opt-in, never as always-on default behavior.
+    ///
+    /// Uses `yellowL`/`yellowR` directly — NOT `settings.screenBoundLeft/Right`.
+    /// Those are two different variables that can drift out of sync (that was a
+    /// real, previously-shipped bug: the visible bars used one, the actual ball
+    /// boundary used the other, so the ball could be capped short of where the
+    /// bars visually showed). yellowL/yellowR are the single source of truth for
+    /// screen bounds everywhere in this file, full stop — settings.screenBound*
+    /// exists only to persist them to disk between launches.
     private func map(_ raw: Int) {
         if hasXMap {
             let targetX = Geometry.mappedX(
                 midi: horizontalOf(raw),
                 axisLeft: settings.axisLeft, axisRight: settings.axisRight,
-                screenL: settings.screenBoundLeft, screenR: settings.screenBoundRight)
-            var l = clamp(settings.screenBoundLeft, 0, 1)
-            var r = clamp(settings.screenBoundRight, 0, 1)
-            if r < l { swap(&l, &r) }
-            px = clamp(targetX, l, r)
+                screenL: yellowL, screenR: yellowR)
+            px = clamp(targetX, min(yellowL, yellowR), max(yellowL, yellowR))
             return
         }
         mapCalibrateThrow(raw)
