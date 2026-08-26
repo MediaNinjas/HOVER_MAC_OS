@@ -83,6 +83,10 @@ final class AppController {
     var hasXMap: Bool { settings.axisMapped && abs(settings.axisRight - settings.axisLeft) >= 6 }
 
     func start() {
+        // Seed the visible bars from whatever was last saved, so they start where
+        // you left them instead of snapping to defaults on launch.
+        yellowL = clamp(settings.screenBoundLeft, 0, 1)
+        yellowR = clamp(settings.screenBoundRight, 0, 1)
         setupOverlay()
         wireUI()
         panel.center()
@@ -772,9 +776,6 @@ final class AppController {
         panel.monitorLabel.stringValue = "MONITOR \(targetScreenIndex + 1)/\(NSScreen.screens.count)"
     }
 
-    private func yellowLeft() -> Double { placingBounds ? yellowL : (hasXMap ? settings.screenBoundLeft : 0) }
-    private func yellowRight() -> Double { placingBounds ? yellowR : (hasXMap ? settings.screenBoundRight : 1) }
-
     private func refreshOverlay() {
         setupOverlay()
         guard let overlay else { return }
@@ -784,8 +785,8 @@ final class AppController {
         } else {
             overlay.orderFrontRegardless()
             overlay.overlayView.ballX = px
-            overlay.overlayView.boundL = yellowLeft()
-            overlay.overlayView.boundR = yellowRight()
+            overlay.overlayView.boundL = yellowL
+            overlay.overlayView.boundR = yellowR
             overlay.overlayView.prompt = placingBounds ? "drag the yellow bars in the app's own graph to adjust" : nil
             overlay.overlayView.refresh()
         }
@@ -793,14 +794,17 @@ final class AppController {
     }
 
     /// Mirrors `RefreshPad()` — updates the embedded in-panel monitor, distinct
-    /// from the full-screen overlay (which only shows in specific states).
+    /// from the full-screen overlay (which only shows in specific states). `yellowL`/
+    /// `yellowR` are always the live, directly-draggable values — no mode-dependent
+    /// substitution with the saved settings value, ever (that was the actual bug
+    /// behind bars snapping back mid-drag).
     private func refreshPad() {
         panel.padView.x = px
         panel.padView.y = 0.5
-        panel.padView.yellowL = yellowLeft()
-        panel.padView.yellowR = yellowRight()
+        panel.padView.yellowL = yellowL
+        panel.padView.yellowR = yellowR
         // Mirrors `CenterScreen01()`: yellow midpoint + fader offset, clamped.
-        let mid = (yellowLeft() + yellowRight()) / 2
+        let mid = (yellowL + yellowR) / 2
         panel.padView.centerX = clamp(mid + Double(settings.shift) / 100.0, 0, 1)
         panel.padView.refresh()
     }
