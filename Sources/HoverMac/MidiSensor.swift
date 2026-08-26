@@ -15,6 +15,9 @@ final class MidiSensor {
     private(set) var lastX: Int = 64
     var onSample: ((Int) -> Void)?
 
+    private var lastSampleAt = Date.distantPast
+    private var lastUnmuteAt = Date.distantPast
+
     private static func isHotHand(_ name: String) -> Bool {
         let compact = name.replacingOccurrences(of: " ", with: "")
         return compact.range(of: "HotHand", options: .caseInsensitive) != nil
@@ -55,8 +58,24 @@ final class MidiSensor {
             ? (opened.count == 1 ? "live" : "live · \(opened.count) receivers")
             : "looking for sensor"
 
-        if connected { unmuteHotHands() }
+        if connected {
+            unmuteHotHands()
+            lastSampleAt = Date() // grace period before the first keepAlive check
+        }
         return connected
+    }
+
+    /// Call this on every tick while connected. The receiver appears to mute itself
+    /// again after a period without traffic (a wireless power-saving behavior) —
+    /// sending the unmute handshake once at connect time isn't enough, it stops
+    /// streaming again later in the same session. If no sample has arrived in the
+    /// last few seconds, re-send the wake-up handshake as a keep-alive.
+    func keepAlive() {
+        guard connected else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastSampleAt) > 3, now.timeIntervalSince(lastUnmuteAt) > 3 else { return }
+        lastUnmuteAt = now
+        unmuteHotHands()
     }
 
     /// The Hot Hand receiver ships muted until something explicitly wakes it up over
@@ -122,6 +141,7 @@ final class MidiSensor {
                     // Hot Hand: CC 4/7/9 = X only. CC 5/8 (Y) intentionally ignored.
                     if cc == 4 || cc == 7 || cc == 9 {
                         lastX = value
+                        lastSampleAt = Date()
                         DispatchQueue.main.async { [weak self] in
                             guard let self else { return }
                             self.onSample?(self.lastX)

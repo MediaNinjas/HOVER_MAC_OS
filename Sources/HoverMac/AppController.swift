@@ -649,6 +649,7 @@ final class AppController {
             refreshOverlay()
             return
         }
+        sensor.keepAlive()
 
         if centering {
             centerSumX += Double(rawX)
