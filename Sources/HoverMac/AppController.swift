@@ -427,13 +427,19 @@ final class AppController {
             return
         }
 
-        // Recording saved. Yellow bars go live at the screen edges and auto-save from
-        // here — drag either one (they mirror around true center) until happy; every
-        // drag release commits. No separate save step.
+        // Recording saved — automatically scale your recorded range to fill the
+        // whole screen edge-to-edge, immediately, no dragging required. This is
+        // the actual point: your arm's natural comfortable range is whatever it
+        // is, and it needs to be stretched to span the full screen every time,
+        // not calibrated to two manually-dragged points. The bars are still
+        // shown and still draggable afterward if you want to fine-tune away from
+        // full edge-to-edge, but working correctly never depends on that.
         placingBounds = true
         panel.playBtn.isEnabled = true
+        yellowL = 0
+        yellowR = 1
         autoSaveCorridor()
-        show("SAVED · drag yellow bars to the screen edges")
+        show("SAVED · mapped edge-to-edge")
         refreshOverlay()
     }
 
