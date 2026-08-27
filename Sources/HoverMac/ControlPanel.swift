@@ -131,7 +131,10 @@ final class PadView: NSView {
     /// that read as the app fighting the mouse. Always treat clicks here as real.
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    private let inset: CGFloat = 10
+    /// Zero, deliberately — the mouse position, the bar's rendered position, and
+    /// the bar's draggable range must all agree exactly, everywhere, with no gap
+    /// between where the cursor is and where the bar can actually reach.
+    private let inset: CGFloat = 0
     private let grabPt: CGFloat = 14
     private var dragging = 0 // 0 none, 1 left, 2 right
 
@@ -176,8 +179,8 @@ final class PadView: NSView {
         ctx.fill(bounds)
 
         let w = bounds.width, h = bounds.height
-        let left: CGFloat = 10, top: CGFloat = 10
-        let right = w - 10, bottom = h - 10
+        let left: CGFloat = inset, top: CGFloat = 4
+        let right = w - inset, bottom = h - 4
         let originX = left + CGFloat(clamp(centerX, 0, 1)) * (right - left)
         let originY = bottom
 
