@@ -4,7 +4,10 @@ import Foundation
 /// (X-axis-only fields; Y stays muted here exactly like `EnableY = false` on Windows).
 struct Settings: Codable {
     var smooth: Int = 80
-    var throwReach: Int = 150
+    /// Slider floor is 8 (not selectable below that) — this is as close to "0"
+    /// as the control allows. Irrelevant to calibrated tracking either way:
+    /// only used pre-calibration, in mapCalibrateThrow().
+    var throwReach: Int = 8
     var range: Int = 100
     /// Reset to 0 — the +35 offset that was here is now baked directly into
     /// screenBoundLeft/Right below, so the slider starts at 0 but the ball still
@@ -22,13 +25,11 @@ struct Settings: Codable {
     /// Default of 8 reflects the value that reliably reached both true edges
     /// in testing.
     var handMotionRange: Int = 8
-    /// Where recorded hand L/R land on the real screen (0..1). Drag yellow bars to change.
-    /// Defaults reflect the tuned starting position from testing (original 9%/67% bars
-    /// shifted +35% to match where Center Offset=35 used to put the center), not a full
-    /// edge-to-edge range — still requires a real RECORD/AUTO calibration pass for
-    /// axisLeft/axisRight.
-    var screenBoundLeft: Double = 0.4427641369047619
-    var screenBoundRight: Double = 1.0176246279761905
+    /// Where recorded hand L/R land on the real screen (0..1). Bars start at the
+    /// true edges by default — not a leftover position from a previous drag —
+    /// and a real RECORD/SAVE overwrites this with an actual calibration anyway.
+    var screenBoundLeft: Double = 0
+    var screenBoundRight: Double = 1
     var mappedScreen: String? = nil
 
     private enum CodingKeys: String, CodingKey {
