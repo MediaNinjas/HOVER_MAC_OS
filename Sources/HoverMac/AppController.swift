@@ -455,8 +455,12 @@ final class AppController {
         if scaleL <= 0.02 { scaleL = 0 }
         if scaleR >= 0.98 { scaleR = 1 }
 
-        settings.axisLeft = motionMin
-        settings.axisRight = motionMax
+        // Fixed, full raw MIDI range (0...127) — not the recorded sweep's min/max.
+        // Per explicit direction: 127 is always the true left edge, 0 is always
+        // the true right edge (after FlipX), full stop. No calibration sweep can
+        // under-shoot this, because it isn't derived from a sweep at all.
+        settings.axisLeft = 0
+        settings.axisRight = 127
         settings.axisMapped = true
         settings.screenBoundLeft = scaleL
         settings.screenBoundRight = scaleR
@@ -744,15 +748,14 @@ final class AppController {
         // MUTE freezes HOVER's own ball in place — it does not touch the real
         // cursor either way (that's never touched), it just stops updating from
         // hand data.
+        //
+        // Single path, always: map(rawX). The old branch here used
+        // corridorMappedX with the recorded sweep's motionMin/motionMax instead —
+        // that's exactly the "old code" that was still fighting the new fixed
+        // 0...127 axis after SAVE. There is now only one function that can ever
+        // set px during live tracking, full stop.
         if !wallDragging && !muted {
-            if placingBounds && !motionRecording && motionMax - motionMin >= 6 {
-                // Review phase (after SAVE, before/while dragging): live hand mapped
-                // straight through the current yellow corridor — no smoothing. Drag a
-                // bar toward the real screen edge and the reach expands to match it.
-                px = Geometry.corridorMappedX(midi: horizontalOf(rawX), motionMin: motionMin, motionMax: motionMax, screenL: yellowL, screenR: yellowR)
-            } else {
-                map(rawX)
-            }
+            map(rawX)
         }
 
         showStatus()
