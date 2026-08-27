@@ -14,6 +14,12 @@ struct Settings: Codable {
     var axisMapped: Bool = false
     var axisLeft: Double = 0
     var axisRight: Double = 0
+    /// "X Hand Motion Range" — how many raw MIDI units (0...127 scale) narrower
+    /// than the full axisLeft...axisRight span your wrist needs to actually
+    /// rotate to reach the true screen edges. 0 = full range required (no
+    /// adjustment). Can be positive or negative; both shrink by the same
+    /// magnitude — the sign just lets the slider be centered like Center Offset.
+    var handMotionRange: Int = 0
     /// Where recorded hand L/R land on the real screen (0..1). Drag yellow bars to change.
     /// Defaults reflect the tuned starting position from testing (original 9%/67% bars
     /// shifted +35% to match where Center Offset=35 used to put the center), not a full
@@ -32,6 +38,7 @@ struct Settings: Codable {
         case axisMapped = "AxisMapped"
         case axisLeft = "AxisLeft"
         case axisRight = "AxisRight"
+        case handMotionRange = "HandMotionRange"
         case screenBoundLeft = "ScreenBoundLeft"
         case screenBoundRight = "ScreenBoundRight"
         case mappedScreen = "MappedScreen"
@@ -50,6 +57,7 @@ struct Settings: Codable {
         if loaded.range < 5 { loaded.range = 40 }
         if loaded.throwReach < 8 { loaded.throwReach = 48 }
         loaded.shift = clampInt(loaded.shift, -50, 50)
+        loaded.handMotionRange = clampInt(loaded.handMotionRange, -127, 127)
         loaded.screenBoundLeft = clamp(loaded.screenBoundLeft, 0, 1)
         loaded.screenBoundRight = clamp(loaded.screenBoundRight, 0, 1)
         if loaded.screenBoundRight < loaded.screenBoundLeft {

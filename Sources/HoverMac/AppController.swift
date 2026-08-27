@@ -197,16 +197,26 @@ final class AppController {
         panel.throwSlider.integerValue = settings.throwReach
         panel.rangeSlider.integerValue = settings.range
         panel.shiftSlider.integerValue = settings.shift
+        panel.handMotionRangeSlider.integerValue = settings.handMotionRange
         panel.smoothValue.stringValue = "\(settings.smooth)"
         panel.throwValue.stringValue = "\(settings.throwReach)"
         panel.rangeValue.stringValue = "\(settings.range)"
         panel.shiftValue.stringValue = "\(settings.shift)"
+        panel.handMotionRangeValue.stringValue = "\(settings.handMotionRange)"
         panel.flipXCheck.state = settings.flipX ? .on : .off
 
         panel.smoothSlider.target = self; panel.smoothSlider.action = #selector(onSmoothChanged)
         panel.throwSlider.target = self; panel.throwSlider.action = #selector(onThrowChanged)
         panel.rangeSlider.target = self; panel.rangeSlider.action = #selector(onRangeChanged)
         panel.shiftSlider.target = self; panel.shiftSlider.action = #selector(onShiftChanged)
+        panel.handMotionRangeSlider.target = self; panel.handMotionRangeSlider.action = #selector(onHandMotionRangeChanged)
+    }
+
+    @objc private func onHandMotionRangeChanged() {
+        if syncing { return }
+        settings.handMotionRange = panel.handMotionRangeSlider.integerValue
+        panel.handMotionRangeValue.stringValue = "\(settings.handMotionRange)"
+        settings.save()
     }
 
     @objc private func onSmoothChanged() {
@@ -314,7 +324,8 @@ final class AppController {
             let targetX = Geometry.mappedX(
                 midi: horizontalOf(raw),
                 axisLeft: settings.axisLeft, axisRight: settings.axisRight,
-                screenL: yellowL, screenR: yellowR)
+                screenL: yellowL, screenR: yellowR,
+                marginMidi: Double(settings.handMotionRange))
             px = clamp(targetX, min(yellowL, yellowR), max(yellowL, yellowR))
             return
         }
@@ -455,12 +466,14 @@ final class AppController {
         if scaleL <= 0.02 { scaleL = 0 }
         if scaleR >= 0.98 { scaleR = 1 }
 
-        // Fixed, full raw MIDI range (0...127) — not the recorded sweep's min/max.
-        // Per explicit direction: 127 is always the true left edge, 0 is always
-        // the true right edge (after FlipX), full stop. No calibration sweep can
-        // under-shoot this, because it isn't derived from a sweep at all.
-        settings.axisLeft = 0
-        settings.axisRight = 127
+        // The RECORDED sweep's actual min/max — this is the whole point of
+        // RECORD: capture your real comfortable motion, then map THAT to the
+        // true screen edges. If it still falls short in practice, that's what
+        // the "X Hand Motion Range" control (Geometry.mappedX's marginMidi) is
+        // for — an adjustable fix, not a hardcoded workaround that bypasses
+        // your actual recorded motion.
+        settings.axisLeft = motionMin
+        settings.axisRight = motionMax
         settings.axisMapped = true
         settings.screenBoundLeft = scaleL
         settings.screenBoundRight = scaleR

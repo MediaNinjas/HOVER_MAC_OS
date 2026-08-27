@@ -23,17 +23,26 @@ enum Geometry {
     }
 
     /// Hand MIDI min/max → screen bounds (post-SAVE mapping).
-    static func mappedX(midi: Double, axisLeft: Double, axisRight: Double, screenL: Double, screenR: Double) -> Double {
+    ///
+    /// `marginMidi` — the "X Hand Motion Range" control, in raw MIDI units
+    /// (0...127 scale), user-adjustable, default 0. This is how much narrower
+    /// than the full axisLeft...axisRight span your wrist actually needs to
+    /// rotate to reach the true screen edges — shrink it and less physical
+    /// motion covers the same full screen width (more sensitive). At 0, the
+    /// full 127-unit range is required, same as no adjustment at all. Sign
+    /// doesn't change the effect (both directions shrink by the same amount);
+    /// the control just allows reaching that shrink from either a positive or
+    /// negative starting value, same idea as the Center Offset slider.
+    static func mappedX(midi: Double, axisLeft: Double, axisRight: Double, screenL: Double, screenR: Double, marginMidi: Double = 0) -> Double {
         let span = axisRight - axisLeft
         if abs(span) < 1e-6 { return 0.5 }
-        // Same edge forgiveness as corridorMappedX — don't require matching the
-        // exact calibrated extreme to reach the true screen edge. axisLeft can be
-        // greater than axisRight on purpose (unsorted, assigned as-aimed during
-        // MAP calibration) — shrink by `margin` in the direction of `span`'s own
-        // sign so that direction is preserved exactly, not sorted away.
-        let margin = span * edgeForgiveness
-        let effectiveLeft = axisLeft + margin
-        let effectiveSpan = span - 2 * margin
+        // axisLeft can be greater than axisRight on purpose (unsorted, assigned
+        // as-aimed during MAP calibration) — shrink by `margin` in the direction
+        // of `span`'s own sign so that direction is preserved exactly, not
+        // sorted away.
+        let signedMargin = span < 0 ? -abs(marginMidi) : abs(marginMidi)
+        let effectiveLeft = axisLeft + signedMargin
+        let effectiveSpan = span - 2 * signedMargin
         let t = abs(effectiveSpan) < 1e-6
             ? clamp((midi - axisLeft) / span, 0, 1)
             : clamp((midi - effectiveLeft) / effectiveSpan, 0, 1)
