@@ -4,7 +4,7 @@ import Foundation
 /// (X-axis-only fields; Y stays muted here exactly like `EnableY = false` on Windows).
 struct Settings: Codable {
     var smooth: Int = 80
-    var throwReach: Int = 48
+    var throwReach: Int = 150
     var range: Int = 100
     /// Reset to 0 — the +35 offset that was here is now baked directly into
     /// screenBoundLeft/Right below, so the slider starts at 0 but the ball still
@@ -19,7 +19,9 @@ struct Settings: Codable {
     /// rotate to reach the true screen edges. 0 = full range required (no
     /// adjustment). Can be positive or negative; both shrink by the same
     /// magnitude — the sign just lets the slider be centered like Center Offset.
-    var handMotionRange: Int = 0
+    /// Default of 8 reflects the value that reliably reached both true edges
+    /// in testing.
+    var handMotionRange: Int = 8
     /// Where recorded hand L/R land on the real screen (0..1). Drag yellow bars to change.
     /// Defaults reflect the tuned starting position from testing (original 9%/67% bars
     /// shifted +35% to match where Center Offset=35 used to put the center), not a full
