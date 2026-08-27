@@ -131,46 +131,58 @@ final class PadView: NSView {
     /// that read as the app fighting the mouse. Always treat clicks here as real.
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    /// Zero, deliberately — the mouse position, the bar's rendered position, and
-    /// the bar's draggable range must all agree exactly, everywhere, with no gap
-    /// between where the cursor is and where the bar can actually reach.
-    private let inset: CGFloat = 0
-    private let grabPt: CGFloat = 14
     private var dragging = 0 // 0 none, 1 left, 2 right
+    private var panRecognizer: NSPanGestureRecognizer?
 
     override var isFlipped: Bool { false } // bottom-left origin, matches Windows GDI+ Y-up math here.
 
     func refresh() { setNeedsDisplay(bounds) }
 
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setUpPanRecognizer()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setUpPanRecognizer()
+    }
+
+    private func setUpPanRecognizer() {
+        let pan = NSPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        addGestureRecognizer(pan)
+        panRecognizer = pan
+    }
+
+    /// x-position (0...1) across the view's full width — no inset, no margin.
+    /// Mouse position and bar position share this exact same [0, bounds.width]
+    /// range everywhere, with nothing between them.
     private func x01(for pointInView: NSPoint) -> Double {
-        let left = inset, right = bounds.width - inset
-        return Double(clamp(Double((pointInView.x - left) / max(1, right - left)), 0, 1))
+        Double(clamp(Double(pointInView.x / max(1, bounds.width)), 0, 1))
     }
 
     private func barScreenX(_ x01: Double) -> CGFloat {
-        let left = inset, right = bounds.width - inset
-        return left + CGFloat(x01) * (right - left)
+        CGFloat(x01) * bounds.width
     }
 
-    override func mouseDown(with event: NSEvent) {
-        let p = convert(event.locationInWindow, from: nil)
-        let sL = barScreenX(yellowL)
-        let sR = barScreenX(yellowR)
-        if abs(p.x - sL) <= grabPt { dragging = 1 }
-        else if abs(p.x - sR) <= grabPt { dragging = 2 }
-    }
-
-    override func mouseDragged(with event: NSEvent) {
-        guard dragging != 0 else { return }
-        let p = convert(event.locationInWindow, from: nil)
-        let v = x01(for: p)
-        if dragging == 1 { onLeftBarDragged?(v) } else { onRightBarDragged?(v) }
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        guard dragging != 0 else { return }
-        dragging = 0
-        onBarDragEnded?()
+    @objc private func handlePan(_ gr: NSPanGestureRecognizer) {
+        let p = gr.location(in: self)
+        switch gr.state {
+        case .began:
+            // Whichever bar is closer wins — no minimum-distance tolerance to fail
+            // silently. You always grab something when you click down.
+            let sL = barScreenX(yellowL), sR = barScreenX(yellowR)
+            dragging = abs(p.x - sL) <= abs(p.x - sR) ? 1 : 2
+        case .changed:
+            guard dragging != 0 else { return }
+            let v = x01(for: p)
+            if dragging == 1 { onLeftBarDragged?(v) } else { onRightBarDragged?(v) }
+        case .ended, .cancelled, .failed:
+            if dragging != 0 { onBarDragEnded?() }
+            dragging = 0
+        default:
+            break
+        }
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -179,8 +191,11 @@ final class PadView: NSView {
         ctx.fill(bounds)
 
         let w = bounds.width, h = bounds.height
-        let left: CGFloat = inset, top: CGFloat = 4
-        let right = w - inset, bottom = h - 4
+        // Bars span the view's full width (0...w) — exactly matching the drag
+        // coordinate space in x01(for:)/barScreenX(_:). Only top/bottom keep a
+        // small cosmetic margin; that never affects horizontal (bar) position.
+        let left: CGFloat = 0, top: CGFloat = 4
+        let right = w, bottom = h - 4
         let originX = left + CGFloat(clamp(centerX, 0, 1)) * (right - left)
         let originY = bottom
 
