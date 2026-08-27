@@ -279,12 +279,15 @@ final class ControlPanel: NSWindow {
     /// How many fewer raw MIDI units than your full recorded range are needed to
     /// reach the true screen edges — shrink this to require less wrist rotation.
     let handMotionRangeSlider = NSSlider(value: 0, minValue: -127, maxValue: 127, target: nil, action: nil)
+    /// Instant sensitivity/gain, not smoothing — see Settings.mouseSpeed.
+    let mouseSpeedSlider = NSSlider(value: 0, minValue: -100, maxValue: 100, target: nil, action: nil)
 
     let smoothValue = NSTextField(labelWithString: "80")
     let throwValue = NSTextField(labelWithString: "48")
     let rangeValue = NSTextField(labelWithString: "40")
     let shiftValue = NSTextField(labelWithString: "0")
     let handMotionRangeValue = NSTextField(labelWithString: "0")
+    let mouseSpeedValue = NSTextField(labelWithString: "0")
 
     let rescanBtn = NeonButton(title: "RESCAN")
     private let devicesBox = SectionBox("DEVICES")
@@ -294,7 +297,7 @@ final class ControlPanel: NSWindow {
 
     init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 940),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 975),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -389,6 +392,7 @@ final class ControlPanel: NSWindow {
             sliderRow("throw", throwSlider, throwValue),
             sliderRow("Edge Range", rangeSlider, rangeValue),
             sliderRow("X Hand Motion Range", handMotionRangeSlider, handMotionRangeValue),
+            sliderRow("Mouse Speed", mouseSpeedSlider, mouseSpeedValue),
             centerRow
         ])
         tuneStack.orientation = .vertical

@@ -13,6 +13,15 @@ struct Settings: Codable {
     /// screenBoundLeft/Right below, so the slider starts at 0 but the ball still
     /// centers exactly where it did before.
     var shift: Int = 0
+    /// "Mouse Speed" — -100...100, default 0 = normal (direct 1:1, no scaling).
+    /// A pure sensitivity/gain multiplier around screen center, applied
+    /// instantly every tick — NOT smoothing, NOT lag, no time delay of any
+    /// kind. Positive = the same hand movement covers MORE screen distance
+    /// (more sensitive/"faster"). Negative = the same hand movement covers
+    /// LESS screen distance (less sensitive/"slower"), requiring more of your
+    /// hand's range to reach a given point. Still hard-clamped at the true
+    /// edges either way — this can never trap the ball short of an edge.
+    var mouseSpeed: Int = 0
     var flipX: Bool = true
     var axisMapped: Bool = false
     var axisLeft: Double = 0
@@ -42,6 +51,7 @@ struct Settings: Codable {
         case axisLeft = "AxisLeft"
         case axisRight = "AxisRight"
         case handMotionRange = "HandMotionRange"
+        case mouseSpeed = "MouseSpeed"
         case screenBoundLeft = "ScreenBoundLeft"
         case screenBoundRight = "ScreenBoundRight"
         case mappedScreen = "MappedScreen"
@@ -61,6 +71,7 @@ struct Settings: Codable {
         if loaded.throwReach < 8 { loaded.throwReach = 48 }
         loaded.shift = clampInt(loaded.shift, -50, 50)
         loaded.handMotionRange = clampInt(loaded.handMotionRange, -127, 127)
+        loaded.mouseSpeed = clampInt(loaded.mouseSpeed, -100, 100)
         loaded.screenBoundLeft = clamp(loaded.screenBoundLeft, 0, 1)
         loaded.screenBoundRight = clamp(loaded.screenBoundRight, 0, 1)
         if loaded.screenBoundRight < loaded.screenBoundLeft {

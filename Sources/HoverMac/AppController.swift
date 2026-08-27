@@ -198,11 +198,13 @@ final class AppController {
         panel.rangeSlider.integerValue = settings.range
         panel.shiftSlider.integerValue = settings.shift
         panel.handMotionRangeSlider.integerValue = settings.handMotionRange
+        panel.mouseSpeedSlider.integerValue = settings.mouseSpeed
         panel.smoothValue.stringValue = "\(settings.smooth)"
         panel.throwValue.stringValue = "\(settings.throwReach)"
         panel.rangeValue.stringValue = "\(settings.range)"
         panel.shiftValue.stringValue = "\(settings.shift)"
         panel.handMotionRangeValue.stringValue = "\(settings.handMotionRange)"
+        panel.mouseSpeedValue.stringValue = "\(settings.mouseSpeed)"
         panel.flipXCheck.state = settings.flipX ? .on : .off
 
         panel.smoothSlider.target = self; panel.smoothSlider.action = #selector(onSmoothChanged)
@@ -210,12 +212,20 @@ final class AppController {
         panel.rangeSlider.target = self; panel.rangeSlider.action = #selector(onRangeChanged)
         panel.shiftSlider.target = self; panel.shiftSlider.action = #selector(onShiftChanged)
         panel.handMotionRangeSlider.target = self; panel.handMotionRangeSlider.action = #selector(onHandMotionRangeChanged)
+        panel.mouseSpeedSlider.target = self; panel.mouseSpeedSlider.action = #selector(onMouseSpeedChanged)
     }
 
     @objc private func onHandMotionRangeChanged() {
         if syncing { return }
         settings.handMotionRange = panel.handMotionRangeSlider.integerValue
         panel.handMotionRangeValue.stringValue = "\(settings.handMotionRange)"
+        settings.save()
+    }
+
+    @objc private func onMouseSpeedChanged() {
+        if syncing { return }
+        settings.mouseSpeed = panel.mouseSpeedSlider.integerValue
+        panel.mouseSpeedValue.stringValue = "\(settings.mouseSpeed)"
         settings.save()
     }
 
@@ -326,7 +336,13 @@ final class AppController {
                 axisLeft: settings.axisLeft, axisRight: settings.axisRight,
                 screenL: yellowL, screenR: yellowR,
                 marginMidi: Double(settings.handMotionRange))
-            px = clamp(targetX, min(yellowL, yellowR), max(yellowL, yellowR))
+            let l = min(yellowL, yellowR), r = max(yellowL, yellowR)
+            // "Mouse Speed": pure instant gain around the corridor's own center —
+            // no smoothing, no time delay. See Settings.mouseSpeed doc.
+            let mid = (l + r) / 2
+            let gain = 1.0 + Double(settings.mouseSpeed) / 100.0
+            let scaledX = mid + (targetX - mid) * gain
+            px = clamp(scaledX, l, r)
             return
         }
         mapCalibrateThrow(raw)
