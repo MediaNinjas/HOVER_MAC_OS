@@ -5,15 +5,22 @@ import Foundation
 struct Settings: Codable {
     var smooth: Int = 80
     var throwReach: Int = 48
-    var range: Int = 40
+    var range: Int = 100
+    /// Reset to 0 — the +35 offset that was here is now baked directly into
+    /// screenBoundLeft/Right below, so the slider starts at 0 but the ball still
+    /// centers exactly where it did before.
     var shift: Int = 0
     var flipX: Bool = true
     var axisMapped: Bool = false
     var axisLeft: Double = 0
     var axisRight: Double = 0
     /// Where recorded hand L/R land on the real screen (0..1). Drag yellow bars to change.
-    var screenBoundLeft: Double = 0
-    var screenBoundRight: Double = 1
+    /// Defaults reflect the tuned starting position from testing (original 9%/67% bars
+    /// shifted +35% to match where Center Offset=35 used to put the center), not a full
+    /// edge-to-edge range — still requires a real RECORD/AUTO calibration pass for
+    /// axisLeft/axisRight.
+    var screenBoundLeft: Double = 0.4427641369047619
+    var screenBoundRight: Double = 1.0176246279761905
     var mappedScreen: String? = nil
 
     private enum CodingKeys: String, CodingKey {
