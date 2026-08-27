@@ -159,7 +159,7 @@ final class PadView: NSView {
     /// range everywhere, with nothing between them. Getting CLOSE to either true
     /// edge snaps all the way to it (widened target zone) — landing exactly on
     /// the literal last pixel shouldn't be required to reach 0% or 100%.
-    private static let edgeSnap = 0.06 // last 6% on either side snaps to 0/1
+    private static let edgeSnap = 0.15 // last 15% on either side snaps to 0/1 — no precision needed
 
     private func x01(for pointInView: NSPoint) -> Double {
         let raw = Double(clamp(Double(pointInView.x / max(1, bounds.width)), 0, 1))
