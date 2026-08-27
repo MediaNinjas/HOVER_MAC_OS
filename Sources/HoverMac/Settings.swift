@@ -4,10 +4,13 @@ import Foundation
 /// (X-axis-only fields; Y stays muted here exactly like `EnableY = false` on Windows).
 struct Settings: Codable {
     var smooth: Int = 80
-    /// Slider floor is 8 (not selectable below that) — this is as close to "0"
-    /// as the control allows. Irrelevant to calibrated tracking either way:
-    /// only used pre-calibration, in mapCalibrateThrow().
-    var throwReach: Int = 8
+    /// Only used BEFORE a calibration exists (mapCalibrateThrow) — irrelevant
+    /// once axisMapped is true. But "irrelevant once mapped" isn't "irrelevant
+    /// always": at the slider floor (8) this is extremely twitchy during the
+    /// pre-calibration window (tiny hand movement = full swing), which reads as
+    /// "flying/too fast" — a real bug this default caused, not a UI complaint.
+    /// 48 was the original working value.
+    var throwReach: Int = 48
     var range: Int = 100
     /// Reset to 0 — the +35 offset that was here is now baked directly into
     /// screenBoundLeft/Right below, so the slider starts at 0 but the ball still
