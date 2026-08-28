@@ -16,15 +16,14 @@ struct Settings: Codable {
     /// screenBoundLeft/Right below, so the slider starts at 0 but the ball still
     /// centers exactly where it did before.
     var shift: Int = 0
-    /// "Mouse Speed" — -100...100, default 0 = normal (direct 1:1, no scaling).
-    /// A pure sensitivity/gain multiplier around screen center, applied
-    /// instantly every tick — NOT smoothing, NOT lag, no time delay of any
-    /// kind. Positive = the same hand movement covers MORE screen distance
-    /// (more sensitive/"faster"). Negative = the same hand movement covers
-    /// LESS screen distance (less sensitive/"slower"), requiring more of your
-    /// hand's range to reach a given point. Still hard-clamped at the true
-    /// edges either way — this can never trap the ball short of an edge.
-    var mouseSpeed: Int = 0
+    /// "Mouse Speed" — -100...100, 0 = normal (direct 1:1, no scaling). A pure
+    /// sensitivity/gain multiplier around screen center, applied instantly
+    /// every tick — NOT smoothing, NOT lag, no time delay of any kind. Positive
+    /// = the same hand movement covers MORE screen distance (more sensitive/
+    /// "faster"). Negative = LESS screen distance (less sensitive/"slower").
+    /// Still hard-clamped at the true edges either way — can never trap the
+    /// ball short of an edge. Default is -20 (20% slower than normal 1:1).
+    var mouseSpeed: Int = -20
     var flipX: Bool = true
     var axisMapped: Bool = false
     var axisLeft: Double = 0
