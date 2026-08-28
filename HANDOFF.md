@@ -1,4 +1,4 @@
-# HOVER Mac — Handoff (2026-08-27)
+# HOVER Mac — Handoff (2026-08-27, updated)
 
 ## Canonical location
 
@@ -20,20 +20,34 @@ RECORD → SAVE → done. No mouse dragging required or expected:
 2. **SAVE** (same button) — auto-scales that recorded range to the true
    screen edges (`screenBoundLeft = 0`, `screenBoundRight = 1`), immediately,
    no dragging. `autoSaveCorridor()` in `AppController.swift`.
-3. Live tracking uses `map()` → `Geometry.mappedX()`, which has one more
-   adjustable knob: **X Hand Motion Range** (TUNE section slider, -127...127,
-   default **8**). This shrinks how much of your recorded range is actually
-   needed to reach the true edges — a real human can't repeat an exact
-   physical extreme every time, so without this the ball would fall
-   perpetually just short. 8 was the value that reliably reached both edges
-   in testing; it's now the baked-in default.
-4. **Throw** defaults to **150** (max) — also confirmed as part of the
-   working configuration.
+3. Live tracking uses `map()` → `Geometry.mappedX()`, which has two adjustable
+   knobs, both in TUNE, both current defaults confirmed working on real
+   hardware:
+   - **X Hand Motion Range** (-127...127, default **8**): shrinks how much of
+     your recorded range is actually needed to reach the true edges — a real
+     human can't repeat an exact physical extreme every time, so without this
+     the ball falls perpetually just short.
+   - **Mouse Speed** (-100...100, default **-20**): a pure instant
+     sensitivity/gain multiplier around the corridor's own center — NOT
+     smoothing, NOT time-based lag, applied fresh every tick. Positive = same
+     hand movement covers more screen distance; negative = less. Still
+     hard-clamped at the true edges regardless of gain — can never trap the
+     ball short.
+4. **Throw defaults to 48** — but READ THIS: Throw is genuinely irrelevant
+   *once a calibration exists* (`hasXMap == true`, status shows **MAPPED**),
+   used only in the pre-calibration path (`mapCalibrateThrow`, status shows
+   **READY**). It is NOT dead code in general — at the slider floor (8) it
+   made the pre-calibration ball fly wildly on tiny hand movements, which was
+   mistaken for a Mouse Speed bug before the real cause (no active
+   calibration at the time) was found. **Always check the status label
+   (READY vs MAPPED) before assuming which code path is even running** — this
+   cost real time twice in this session.
 
 `clamp()` is the only thing that stops the ball at an edge — a hard stop,
 mathematically "stay exactly there," not resistance or easing. There is no
-smoothing/lerp/gravity anywhere in the ball's motion (`AppController.swift`'s
-`map()`/`mapCalibrateThrow()` — verified, grepped every `px =` assignment).
+time-based smoothing/lerp/gravity anywhere in the ball's motion
+(`AppController.swift`'s `map()`/`mapCalibrateThrow()`) — Mouse Speed is
+instant gain, explicitly not a delay effect, per direct instruction.
 
 ## Hardware notes (Hot Hand MIDI receiver)
 
