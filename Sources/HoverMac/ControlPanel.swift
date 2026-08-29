@@ -27,6 +27,25 @@ private func checkboxTitle(_ text: String) -> NSAttributedString {
 /// A flat, bordered, cyan-on-black button matching Windows' `StyleButton`.
 final class NeonButton: NSButton {
     private let border = CALayer()
+    private var currentColor = Neon.cyan
+
+    /// `NSButton.title` alone is invisible on this button — it only ever
+    /// draws `attributedTitle`. Every call site across the app that does
+    /// `someBtn.title = "CANCEL"` (or "...", or a countdown) relied on plain
+    /// `title`, so none of those label changes ever actually rendered —
+    /// buttons silently kept showing their original text the whole time.
+    /// Overriding the setter here fixes it everywhere at once, no call site
+    /// changes needed.
+    override var title: String {
+        get { super.title }
+        set {
+            super.title = newValue
+            attributedTitle = NSAttributedString(string: newValue, attributes: [
+                .font: mono(11, bold: true),
+                .foregroundColor: currentColor
+            ])
+        }
+    }
 
     convenience init(title: String) {
         self.init(title: title, target: nil, action: nil)
@@ -35,10 +54,7 @@ final class NeonButton: NSButton {
         font = mono(11, bold: true)
         contentTintColor = Neon.cyan
         setButtonType(.momentaryChange)
-        attributedTitle = NSAttributedString(string: title, attributes: [
-            .font: mono(11, bold: true),
-            .foregroundColor: Neon.cyan
-        ])
+        self.title = title
         layer?.backgroundColor = Neon.panelFill.cgColor
         border.borderColor = Neon.borderCyan.cgColor
         border.borderWidth = 1
@@ -47,12 +63,9 @@ final class NeonButton: NSButton {
     }
 
     func setActive(_ active: Bool, activeColor: NSColor = Neon.orange) {
-        let color = active ? activeColor : Neon.cyan
-        attributedTitle = NSAttributedString(string: title, attributes: [
-            .font: mono(11, bold: true),
-            .foregroundColor: color
-        ])
-        border.borderColor = color.cgColor
+        currentColor = active ? activeColor : Neon.cyan
+        title = title // re-render with the new color, via the setter above.
+        border.borderColor = currentColor.cgColor
     }
 
     override func layout() {

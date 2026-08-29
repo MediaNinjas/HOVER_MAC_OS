@@ -81,7 +81,9 @@ final class AppController: NSObject, NSWindowDelegate {
     private var detectPhase: DetectPhase = .idle
     private var detectPhaseStart = Date.distantPast
     private var detectRanges: [Int: (min: Double, max: Double)] = [:]
-    private let detectDuration: TimeInterval = 2.5
+    /// Matches AUTO's Y window (8s) — every timed capture in the app uses the
+    /// same duration now, no more silently-different windows on similar features.
+    private let detectDuration: TimeInterval = 8.0
     /// Below this raw MIDI swing, a "winner" isn't trusted — avoids locking
     /// onto sensor noise if the user didn't actually move during the window.
     private let detectMinSwing: Double = 8
@@ -692,6 +694,7 @@ final class AppController: NSObject, NSWindowDelegate {
 
         if detectPhase != .idle {
             sampleDetect()
+            updateDetectButtonTitles()
             refreshSourceOptionsIfNeeded()
             showStatus()
             refreshOverlay()
@@ -730,6 +733,26 @@ final class AppController: NSObject, NSWindowDelegate {
 
     private func resyncSourceMenus() {
         panel.setSourceOptions(lastKnownCCSet.sorted(), selectedX: settings.xSourceCC, selectedY: settings.ySourceCC)
+    }
+
+    private func detectSecsLeft() -> Int {
+        max(0, Int(ceil(detectDuration - Date().timeIntervalSince(detectPhaseStart))))
+    }
+
+    /// Puts the live countdown right on the button doing the capturing, not
+    /// just in the status line — the thing your eye is already on.
+    private func updateDetectButtonTitles() {
+        let secs = "\(detectSecsLeft())s"
+        switch detectPhase {
+        case .horizontal, .vertical:
+            panel.detectBtn.title = secs
+        case .recordX:
+            panel.recordXBtn.title = secs
+        case .recordY:
+            panel.recordYBtn.title = secs
+        case .idle:
+            break
+        }
     }
 
     /// One window watching for horizontal movement, then one watching for
@@ -832,10 +855,10 @@ final class AppController: NSObject, NSWindowDelegate {
                 }
                 panel.statusLabel.stringValue = "AUTO · " + parts.joined(separator: "  ")
             }
-            else if detectPhase == .horizontal { panel.statusLabel.stringValue = "FIND AXES · move LEFT-RIGHT" }
-            else if detectPhase == .vertical { panel.statusLabel.stringValue = "FIND AXES · move UP-DOWN" }
-            else if detectPhase == .recordX { panel.statusLabel.stringValue = "RECORD X · do the gesture" }
-            else if detectPhase == .recordY { panel.statusLabel.stringValue = "RECORD Y · do the gesture" }
+            else if detectPhase == .horizontal { panel.statusLabel.stringValue = "FIND AXES · move LEFT-RIGHT · \(detectSecsLeft())s" }
+            else if detectPhase == .vertical { panel.statusLabel.stringValue = "FIND AXES · move UP-DOWN · \(detectSecsLeft())s" }
+            else if detectPhase == .recordX { panel.statusLabel.stringValue = "RECORD X · do the gesture · \(detectSecsLeft())s" }
+            else if detectPhase == .recordY { panel.statusLabel.stringValue = "RECORD Y · do the gesture · \(detectSecsLeft())s" }
             else if muted { panel.statusLabel.stringValue = "MUTED" }
             else if !settings.enableX && !settings.enableY { panel.statusLabel.stringValue = "OFF" }
             else if (!settings.enableX || hasXMap) && (!settings.enableY || hasYMap) { panel.statusLabel.stringValue = "MAPPED" }
