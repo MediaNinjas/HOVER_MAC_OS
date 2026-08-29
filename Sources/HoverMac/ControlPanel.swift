@@ -106,10 +106,10 @@ private final class SectionBox: NSView {
     }
 }
 
-/// Embedded live-position monitor — port of Windows' `Pad` control (the small
-/// graph at the top of the panel, distinct from the full-screen `OverlayWindow`).
-/// Same visual language: grid crosshair, cyan frame, orange throw-triangle,
-/// yellow corridor bars, the ball, and a hot-pink edge line when pinned at 0/1.
+/// Embedded live-position monitor — port of Windows' `Pad` control. Display
+/// only: the yellow bars shown here are whatever AUTO locked (or 0/1 before
+/// that) — there is no dragging here anymore. AUTO is the only thing that
+/// ever sets them, and nothing else ever touches them afterward.
 final class PadView: NSView {
     var x: Double = 0.5
     var y: Double = 0.5
@@ -117,80 +117,9 @@ final class PadView: NSView {
     var yellowR: Double = 1
     var centerX: Double = 0.5
 
-    /// Dragging these bars works identically no matter what mode/state the rest of
-    /// the app is in — there is no "enter calibrate mode" toggle here on purpose.
-    /// Ordinary in-window dragging (no full-screen tricks, no click-through games),
-    /// so it can never affect anything outside this small view.
-    var onLeftBarDragged: ((Double) -> Void)?
-    var onRightBarDragged: ((Double) -> Void)?
-    var onBarDragEnded: (() -> Void)?
-
-    /// Without this, the FIRST click on a bar when the window isn't already key
-    /// just activates the window instead of starting a real drag — the click gets
-    /// silently eaten. That's exactly the kind of "won't let me grab it" behavior
-    /// that read as the app fighting the mouse. Always treat clicks here as real.
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    private var dragging = 0 // 0 none, 1 left, 2 right
-    private var panRecognizer: NSPanGestureRecognizer?
-
     override var isFlipped: Bool { false } // bottom-left origin, matches Windows GDI+ Y-up math here.
 
     func refresh() { setNeedsDisplay(bounds) }
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        setUpPanRecognizer()
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        setUpPanRecognizer()
-    }
-
-    private func setUpPanRecognizer() {
-        let pan = NSPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
-        addGestureRecognizer(pan)
-        panRecognizer = pan
-    }
-
-    /// x-position (0...1) across the view's full width — no inset, no margin.
-    /// Mouse position and bar position share this exact same [0, bounds.width]
-    /// range everywhere, with nothing between them. Getting CLOSE to either true
-    /// edge snaps all the way to it (widened target zone) — landing exactly on
-    /// the literal last pixel shouldn't be required to reach 0% or 100%.
-    private static let edgeSnap = 0.15 // last 15% on either side snaps to 0/1 — no precision needed
-
-    private func x01(for pointInView: NSPoint) -> Double {
-        let raw = Double(clamp(Double(pointInView.x / max(1, bounds.width)), 0, 1))
-        if raw <= Self.edgeSnap { return 0 }
-        if raw >= 1 - Self.edgeSnap { return 1 }
-        return raw
-    }
-
-    private func barScreenX(_ x01: Double) -> CGFloat {
-        CGFloat(x01) * bounds.width
-    }
-
-    @objc private func handlePan(_ gr: NSPanGestureRecognizer) {
-        let p = gr.location(in: self)
-        switch gr.state {
-        case .began:
-            // Whichever bar is closer wins — no minimum-distance tolerance to fail
-            // silently. You always grab something when you click down.
-            let sL = barScreenX(yellowL), sR = barScreenX(yellowR)
-            dragging = abs(p.x - sL) <= abs(p.x - sR) ? 1 : 2
-        case .changed:
-            guard dragging != 0 else { return }
-            let v = x01(for: p)
-            if dragging == 1 { onLeftBarDragged?(v) } else { onRightBarDragged?(v) }
-        case .ended, .cancelled, .failed:
-            if dragging != 0 { onBarDragEnded?() }
-            dragging = 0
-        default:
-            break
-        }
-    }
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
@@ -198,9 +127,6 @@ final class PadView: NSView {
         ctx.fill(bounds)
 
         let w = bounds.width, h = bounds.height
-        // Bars span the view's full width (0...w) — exactly matching the drag
-        // coordinate space in x01(for:)/barScreenX(_:). Only top/bottom keep a
-        // small cosmetic margin; that never affects horizontal (bar) position.
         let left: CGFloat = 0, top: CGFloat = 4
         let right = w, bottom = h - 4
         let originX = left + CGFloat(clamp(centerX, 0, 1)) * (right - left)
@@ -256,38 +182,27 @@ final class PadView: NSView {
     }
 }
 
-/// The HOVER control window — mirrors the Windows form's MOTION + TOOLS + TUNE panels.
+/// The HOVER control window. Deliberately minimal, per direct instruction:
+/// AUTO + MUTE + DEVICES + two sliders (Mouse Speed, Center Offset). Nothing
+/// else — RECORD/PLAY/MAP and the TUNE sliders that either did nothing or
+/// caused unwanted resistance were removed rather than kept as dead weight.
 final class ControlPanel: NSWindow {
     let statusLabel = NSTextField(labelWithString: "SEARCHING GRID")
     let readoutLabel = NSTextField(labelWithString: "X  ---")
     let monitorLabel = NSTextField(labelWithString: "MONITOR")
     let padView = PadView()
 
-    let recordBtn = NeonButton(title: "RECORD HAND MOVEMENT")
-    let playBtn = NeonButton(title: "PLAY")
-    let mapBtn = NeonButton(title: "MAP")
     let autoBtn = NeonButton(title: "AUTO")
     let muteBtn = NeonButton(title: "MUTE")
-    let centerBtn = NeonButton(title: "SET")
     let monitorBtn = NeonButton(title: "MONITOR")
     let flipXCheck = NSButton(checkboxWithTitle: "FLIP X", target: nil, action: nil)
 
-    let smoothSlider = NSSlider(value: 80, minValue: 0, maxValue: 100, target: nil, action: nil)
-    let throwSlider = NSSlider(value: 48, minValue: 8, maxValue: 150, target: nil, action: nil)
-    let rangeSlider = NSSlider(value: 40, minValue: 5, maxValue: 200, target: nil, action: nil)
     let shiftSlider = NSSlider(value: 0, minValue: -50, maxValue: 50, target: nil, action: nil)
-    /// How many fewer raw MIDI units than your full recorded range are needed to
-    /// reach the true screen edges — shrink this to require less wrist rotation.
-    let handMotionRangeSlider = NSSlider(value: 0, minValue: -127, maxValue: 127, target: nil, action: nil)
     /// Instant sensitivity/gain, not smoothing — see Settings.mouseSpeed.
-    let mouseSpeedSlider = NSSlider(value: 0, minValue: -100, maxValue: 100, target: nil, action: nil)
+    let mouseSpeedSlider = NSSlider(value: -20, minValue: -100, maxValue: 100, target: nil, action: nil)
 
-    let smoothValue = NSTextField(labelWithString: "80")
-    let throwValue = NSTextField(labelWithString: "48")
-    let rangeValue = NSTextField(labelWithString: "40")
     let shiftValue = NSTextField(labelWithString: "0")
-    let handMotionRangeValue = NSTextField(labelWithString: "0")
-    let mouseSpeedValue = NSTextField(labelWithString: "0")
+    let mouseSpeedValue = NSTextField(labelWithString: "-20")
 
     let rescanBtn = NeonButton(title: "RESCAN")
     private let devicesBox = SectionBox("DEVICES")
@@ -297,7 +212,7 @@ final class ControlPanel: NSWindow {
 
     init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 975),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 620),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -311,29 +226,16 @@ final class ControlPanel: NSWindow {
         buildUI()
     }
 
-    private func valueLabel(_ text: String) -> NSTextField {
-        let label = NSTextField(labelWithString: text)
-        label.font = mono(11, bold: true)
-        label.textColor = Neon.cyan
-        label.alignment = .right
-        label.widthAnchor.constraint(equalToConstant: 32).isActive = true
-        return label
-    }
-
     private func sliderLabel(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)
         label.font = mono(10)
         label.textColor = Neon.dimCyan
-        label.widthAnchor.constraint(equalToConstant: 78).isActive = true
+        label.widthAnchor.constraint(equalToConstant: 90).isActive = true
         return label
     }
 
-    private func styleSlider(_ slider: NSSlider) {
-        slider.widthAnchor.constraint(equalToConstant: 190).isActive = true
-    }
-
     private func sliderRow(_ name: String, _ slider: NSSlider, _ value: NSTextField) -> NSView {
-        styleSlider(slider)
+        slider.widthAnchor.constraint(equalToConstant: 190).isActive = true
         let row = NSStackView(views: [sliderLabel(name), slider, value])
         row.orientation = .horizontal
         row.spacing = 8
@@ -368,32 +270,17 @@ final class ControlPanel: NSWindow {
         padView.widthAnchor.constraint(equalToConstant: 420).isActive = true
         padView.heightAnchor.constraint(equalToConstant: 150).isActive = true
 
-        // MOTION
-        let motion = SectionBox("MOTION")
-        motion.body.addArrangedSubview(recordBtn)
-        motion.body.addArrangedSubview(playBtn)
-        motion.heightAnchor.constraint(equalToConstant: 56).isActive = true
-
         // TOOLS
         let tools = SectionBox("TOOLS")
         tools.body.addArrangedSubview(muteBtn)
-        tools.body.addArrangedSubview(mapBtn)
         tools.body.addArrangedSubview(autoBtn)
         tools.heightAnchor.constraint(equalToConstant: 56).isActive = true
 
-        // TUNE
-        let tune = SectionBox("TUNE (fine adjust after calibrate)")
-        let centerRow = NSStackView(views: [centerBtn, sliderRow("Center Offset", shiftSlider, shiftValue)])
-        centerRow.orientation = .horizontal
-        centerRow.spacing = 8
-        centerBtn.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        // TUNE — exactly two controls, per direct instruction.
+        let tune = SectionBox("TUNE")
         let tuneStack = NSStackView(views: [
-            sliderRow("smooth", smoothSlider, smoothValue),
-            sliderRow("throw", throwSlider, throwValue),
-            sliderRow("Edge Range", rangeSlider, rangeValue),
-            sliderRow("X Hand Motion Range", handMotionRangeSlider, handMotionRangeValue),
             sliderRow("Mouse Speed", mouseSpeedSlider, mouseSpeedValue),
-            centerRow
+            sliderRow("Center Offset", shiftSlider, shiftValue)
         ])
         tuneStack.orientation = .vertical
         tuneStack.alignment = .leading
@@ -423,7 +310,7 @@ final class ControlPanel: NSWindow {
 
         let root = NSStackView(views: [
             header, padView, readoutLabel,
-            motion, tools, tune, devicesBox, bottomRow
+            tools, tune, devicesBox, bottomRow
         ])
         root.orientation = .vertical
         root.alignment = .leading
@@ -431,7 +318,7 @@ final class ControlPanel: NSWindow {
         root.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 16, right: 20)
         root.translatesAutoresizingMaskIntoConstraints = false
 
-        for section in [motion, tools, tune, devicesBox] {
+        for section in [tools, tune, devicesBox] {
             section.translatesAutoresizingMaskIntoConstraints = false
             section.widthAnchor.constraint(equalToConstant: 420).isActive = true
         }
@@ -442,8 +329,6 @@ final class ControlPanel: NSWindow {
             root.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             root.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor)
         ])
-
-        playBtn.isEnabled = false
     }
 
     /// Rebuilds the DEVICES checkbox list to match `devices` exactly. Cheap enough
