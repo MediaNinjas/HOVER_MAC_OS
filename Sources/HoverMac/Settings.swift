@@ -16,15 +16,13 @@ struct Settings: Codable {
     var screenBoundLeft: Double = 0
     var screenBoundRight: Double = 1
     var mappedScreen: String? = nil
-    /// "Mouse Speed" — -100...100, 0 = normal (direct 1:1). Pure instant
-    /// sensitivity/gain multiplier around the corridor's own center — NOT
-    /// smoothing, NOT time-based lag, recomputed fresh every tick. Positive =
-    /// same hand movement covers MORE screen distance. Negative = LESS.
-    /// Always hard-clamped at the true edges regardless of gain — this can
-    /// never trap the ball short of an edge, and it never "readjusts" or pulls
-    /// on its own after being set; it's a pure function of the current hand
-    /// position and this one number, nothing else, every tick.
-    var mouseSpeed: Int = -20
+    /// "Mouse Speed" — -100...100, 0 (default) = direct 1:1, zero artificial
+    /// effect on range. Negative values cap how far the ball can move per
+    /// tick, so they can only ever slow down how fast the ball follows the
+    /// hand — never how far it can ultimately go. Held at the hand's true
+    /// calibrated extreme long enough, the ball always reaches the exact true
+    /// screen edge regardless of this value. See `AppController.map()`.
+    var mouseSpeed: Int = 0
 
     private enum CodingKeys: String, CodingKey {
         case shift = "Shift"

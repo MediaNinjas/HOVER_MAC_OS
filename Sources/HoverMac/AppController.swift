@@ -15,7 +15,7 @@ import AppKit
 /// HOVER can't take it over, fight it, or be affected by it, full stop,
 /// regardless of app state. This is intentional per explicit direction after
 /// an earlier build warped the real cursor and locked out trackpad input.
-final class AppController {
+final class AppController: NSObject, NSWindowDelegate {
     let sensor = MidiSensor()
     let panel = ControlPanel()
     var overlay: OverlayWindow?
@@ -68,6 +68,7 @@ final class AppController {
         yellowR = clamp(settings.screenBoundRight, 0, 1)
         setupOverlay()
         wireUI()
+        panel.delegate = self
         panel.center()
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -136,6 +137,8 @@ final class AppController {
         panel.muteBtn.action = #selector(onMuteTapped)
         panel.monitorBtn.target = self
         panel.monitorBtn.action = #selector(onMonitorTapped)
+        panel.quitBtn.target = self
+        panel.quitBtn.action = #selector(onQuitTapped)
         panel.flipXCheck.target = self
         panel.flipXCheck.action = #selector(onFlipXChanged)
         panel.rescanBtn.target = self
@@ -180,6 +183,16 @@ final class AppController {
         showStatus()
     }
     @objc private func onAutoTapped() { autoRanging ? cancelAuto() : startAuto() }
+    @objc private func onQuitTapped() { NSApp.terminate(nil) }
+
+    /// The overlay window is always open on its own, so the panel is never
+    /// actually the "last window" when you hit its red close button —
+    /// `applicationShouldTerminateAfterLastWindowClosed` never gets a chance
+    /// to fire and the app (and the full-screen overlay) is left running.
+    /// Quit explicitly instead of relying on that.
+    func windowWillClose(_ notification: Notification) {
+        NSApp.terminate(nil)
+    }
 
     // MARK: - Force kill (F12 F12)
 
@@ -210,23 +223,34 @@ final class AppController {
         settings.flipX ? Double(127 - raw) : Double(raw)
     }
 
-    /// The only function that ever sets the ball's live position. Direct,
-    /// 1:1, no smoothing/easing/lag of any kind — hard-clamped at either true
-    /// edge, nothing else touches it. Before AUTO has ever locked a range,
-    /// uses the full fixed 0...127 MIDI range as a sane default so the ball
-    /// still does something reasonable.
+    /// The only function that ever sets the ball's live position. Before AUTO
+    /// has ever locked a range, uses the full fixed 0...127 MIDI range as a
+    /// sane default so the ball still does something reasonable.
+    ///
+    /// Mouse Speed at 0 (the default) is a direct 1:1 map — held at the
+    /// hand's true calibrated extreme, the ball is exactly at the true screen
+    /// edge, full stop. It does NOT multiply/compress the range around the
+    /// corridor center — a gain like that used to silently cap the ball short
+    /// of the edge (e.g. gain 0.8 → the ball topped out at 90% of the
+    /// screen), which looked exactly like AUTO having locked a smaller range
+    /// than it actually did. Negative Mouse Speed only caps how far the ball
+    /// can move in a single tick, so it can only ever slow down how fast the
+    /// ball follows the hand — held in the same hand position long enough it
+    /// always arrives at the exact same target a direct 1:1 map would give.
     private func map(_ raw: Int) {
         let midi = horizontalOf(raw)
         let axisLeft = hasXMap ? settings.axisLeft : 0
         let axisRight = hasXMap ? settings.axisRight : 127
-        let targetX = Geometry.mappedX(midi: midi, axisLeft: axisLeft, axisRight: axisRight, screenL: yellowL, screenR: yellowR)
+        let rawTargetX = Geometry.mappedX(midi: midi, axisLeft: axisLeft, axisRight: axisRight, screenL: yellowL, screenR: yellowR)
         let l = min(yellowL, yellowR), r = max(yellowL, yellowR)
-        // "Mouse Speed": pure instant gain around the corridor's own center —
-        // no smoothing, no time delay. See Settings.mouseSpeed doc.
-        let mid = (l + r) / 2
-        let gain = 1.0 + Double(settings.mouseSpeed) / 100.0
-        let scaledX = mid + (targetX - mid) * gain + Double(settings.shift) / 100.0
-        px = clamp(scaledX, l, r)
+        let targetX = clamp(rawTargetX + Double(settings.shift) / 100.0, l, r)
+
+        // Positive Mouse Speed has no extra effect — 0 is already an instant,
+        // uncapped, single-tick jump to targetX, so there's no "faster" than that.
+        let speed = min(0, settings.mouseSpeed)
+        let maxStep = speed == 0 ? 1.0 : max(0.004, 1.0 + Double(speed) / 100.0)
+        let delta = clamp(targetX - px, -maxStep, maxStep)
+        px = clamp(px + delta, l, r)
     }
 
     private func toggleMute() { muteHover(!muted) }

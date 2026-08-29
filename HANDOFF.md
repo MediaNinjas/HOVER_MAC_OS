@@ -1,124 +1,121 @@
-# HOVER Mac — Handoff (2026-08-27, updated)
+# HOVER Mac — Handoff (2026-08-28, rewritten — major simplification)
 
 ## Canonical location
 
-This folder is the Mac build: `~/Developer/HOVER_MAC_OS` (separate git repo,
-`MediaNinjas/HOVER_MAC_OS` on GitHub — intentionally separate from the Windows
-repo, different toolchain, no shared code).
+`~/Developer/HOVER_MAC_OS` (separate git repo, `MediaNinjas/HOVER_MAC_OS` on
+GitHub — intentionally separate from the Windows repo, different toolchain,
+no shared code).
 
 Build/run: `swift build`, then either `swift run` or copy the binary into
-`HOVER.app/Contents/MacOS/HoverMac` and `open HOVER.app` (the `.app` bundle is
-what lets macOS treat it as a real app for permission grants — it's
-gitignored, rebuild it locally with the commands above, it's not checked in).
+`HOVER.app/Contents/MacOS/HoverMac` and `open HOVER.app` (the `.app` bundle
+lets macOS treat it as a real app for permission grants — it's gitignored,
+rebuild it locally, it's not checked in).
 
-## Confirmed working, on real hardware, as of this commit
+## Current design (as of this commit) — read this before assuming anything from older history
 
-RECORD → SAVE → done. No mouse dragging required or expected:
+The app went through many iterations (RECORD/SAVE with mouse-dragged
+calibration bars, several TUNE sliders, a "corridor" concept) that turned out
+unreliable or confusing across a long session of real-hardware testing. All
+of that was **removed entirely**, not disabled. If you're reading old commit
+messages and see references to RECORD, SAVE, MAP, drag-to-edge, Smooth,
+Throw, Edge Range, or X Hand Motion Range — none of that exists anymore.
+Don't resurrect it without direct instruction.
 
-1. **RECORD HAND MOVEMENT** — sweep your hand through its natural comfortable
-   range. Captures raw MIDI min/max (`motionMin`/`motionMax`).
-2. **SAVE** (same button) — auto-scales that recorded range to the true
-   screen edges (`screenBoundLeft = 0`, `screenBoundRight = 1`), immediately,
-   no dragging. `autoSaveCorridor()` in `AppController.swift`.
-3. Live tracking uses `map()` → `Geometry.mappedX()`, which has two adjustable
-   knobs, both in TUNE, both current defaults confirmed working on real
-   hardware:
-   - **X Hand Motion Range** (-127...127, default **8**): shrinks how much of
-     your recorded range is actually needed to reach the true edges — a real
-     human can't repeat an exact physical extreme every time, so without this
-     the ball falls perpetually just short.
-   - **Mouse Speed** (-100...100, default **-20**): a pure instant
-     sensitivity/gain multiplier around the corridor's own center — NOT
-     smoothing, NOT time-based lag, applied fresh every tick. Positive = same
-     hand movement covers more screen distance; negative = less. Still
-     hard-clamped at the true edges regardless of gain — can never trap the
-     ball short.
-4. **Throw defaults to 48** — but READ THIS: Throw is genuinely irrelevant
-   *once a calibration exists* (`hasXMap == true`, status shows **MAPPED**),
-   used only in the pre-calibration path (`mapCalibrateThrow`, status shows
-   **READY**). It is NOT dead code in general — at the slider floor (8) it
-   made the pre-calibration ball fly wildly on tiny hand movements, which was
-   mistaken for a Mouse Speed bug before the real cause (no active
-   calibration at the time) was found. **Always check the status label
-   (READY vs MAPPED) before assuming which code path is even running** — this
-   cost real time twice in this session.
+**What exists now, full stop:**
+- **AUTO** — sweep your hand left/right until it locks (multi-pass edge
+  detection, `EdgeSolve.swift`, unchanged/working). This is the only
+  calibration method. Locks `axisLeft`/`axisRight` (raw MIDI extremes) AND
+  always forces `screenBoundLeft = 0`, `screenBoundRight = 1` (true screen
+  edges) — every single time, no exceptions, no leftover stale values.
+- **MUTE** — freezes HOVER's own ball in place. Does not touch the real
+  cursor either way (that's never touched, see below).
+- **DEVICES** — lists every MIDI source CoreMIDI sees, each with an on/off
+  checkbox, plus RESCAN to manually re-enumerate.
+- **Mouse Speed** slider (-100...100, default **-20**) — pure instant
+  sensitivity/gain multiplier around the corridor's center. NOT smoothing,
+  NOT time-based lag — recomputed fresh every tick from the current hand
+  position and this one number, nothing else. Still always hard-clamped at
+  the true edges regardless of gain.
+- **Center Offset** slider (-50...50) — pan, as percent of screen width.
+- **FLIP X**, **MONITOR** (cycle displays).
 
-`clamp()` is the only thing that stops the ball at an edge — a hard stop,
-mathematically "stay exactly there," not resistance or easing. There is no
-time-based smoothing/lerp/gravity anywhere in the ball's motion
-(`AppController.swift`'s `map()`/`mapCalibrateThrow()`) — Mouse Speed is
-instant gain, explicitly not a delay effect, per direct instruction.
+That's the entire control surface. `map()` in `AppController.swift` is the
+only function that ever sets the ball's position — direct linear map
+(`Geometry.mappedX`, the only function left in `Geometry.swift`), Mouse Speed
+gain and Center Offset pan applied on top, hard-clamped. Before AUTO has ever
+locked a range, it uses the full fixed 0-127 MIDI range as a default so the
+ball still does something reasonable.
+
+**Nothing "pulls" on the ball after AUTO locks.** No periodic re-adjustment,
+no symmetrize-around-center, no drag mechanism to fight. This was explicit,
+repeated direction after multiple rounds of exactly that kind of "invisible
+readjustment" causing real, hard-to-diagnose bugs (see below).
+
+## Real bugs found and fixed in this session (useful if similar symptoms return)
+
+- **"Space between MIDI 0 and the side" on both edges after AUTO** — the
+  actual cause: `finishAuto()` never set `screenBoundLeft`/`screenBoundRight`
+  at all. It locked the MIDI axis but left the screen boundary at whatever
+  stale value was already there. Fixed by always forcing 0/1 there,
+  unconditionally, every lock.
+- **"Flying from one side to the other" / Mouse Speed "not connected"** — the
+  status label said **READY**, not **MAPPED**, meaning there was no active
+  calibration and a completely different (now-deleted) code path was
+  running. **Always check the status label before assuming which mapping
+  logic is even active** if something's behaving strangely — this caused
+  real confusion more than once.
+- Earlier in the session (now moot, since that whole flow is deleted): a
+  10px coordinate margin, a `minBarGap` resistance clamp, and a
+  settings/live-state desync all caused a manually-dragged calibration bar to
+  never quite reach the true edge. Not relevant to the current AUTO-only
+  design, but if anyone ever re-adds a draggable UI element, re-read this
+  git history first (`git log --oneline` around late Aug 2026) — the same
+  category of bug (a value shown in the UI diverging from the value actually
+  used for computation) recurred multiple times and is worth being paranoid
+  about.
 
 ## Hardware notes (Hot Hand MIDI receiver)
 
-- The receiver needs an explicit "unmute" MIDI handshake sent to it before it
-  streams — `MidiSensor.swift`'s `unmuteHotHands()` (CC112=127, then
-  CC102-111=127, on all 16 channels, to the Hot Hand's MIDI **destination**).
-  This was written on the Windows side (`MidiInput.cs`) but never wired into
-  the live Windows app either.
-- The receiver also **goes quiet again** after a few seconds of no traffic —
-  a `keepAlive()` re-sends the same handshake automatically if no sample has
-  landed in 3+ seconds while connected. Still can have real, hardware-level
-  wireless dropouts between the ring and the receiver (independent of
-  software) — if the X readout freezes and the receiver's own LED isn't
-  solid, that's a physical RF issue, not a code bug. Check `system_profiler
-  SPUSBDataType` for the receiver and CoreMIDI source list if debugging this.
-- **DEVICES panel** (new): lists every MIDI source CoreMIDI sees (not just
-  auto-detected Hot Hand ones), each with an on/off checkbox, plus RESCAN.
-  `MidiSensor.devices` / `setDevice(_:enabled:)`.
+- Needs an explicit "unmute" MIDI handshake before it streams —
+  `MidiSensor.swift`'s `unmuteHotHands()` (CC112=127, then CC102-111=127, on
+  all 16 channels, to the Hot Hand's MIDI **destination**). Written on the
+  Windows side (`MidiInput.cs`) but never wired into the live Windows app.
+- Goes quiet again after a few seconds of no traffic — `keepAlive()`
+  re-sends the handshake if no sample has landed in 3+ seconds. Can still
+  have genuine hardware-level wireless dropouts between the ring and
+  receiver, independent of software — if the X readout freezes and the
+  receiver's own LED isn't solid, that's physical, not a code bug.
 
 ## Cursor safety — read this before touching anything cursor-related
 
-**HOVER never touches the real OS cursor. This is deliberate and load-bearing,
-not an oversight to "fix."** An earlier version drove the real cursor via
-`CGWarpMouseCursorPosition`, which fought/overrode real trackpad input and
-locked the user out of their own machine twice, requiring a forced shutdown
-both times. `CursorDriver.swift` was deleted entirely (not left unused) so it
-can't be silently re-wired. HOVER only ever moves its own on-screen ball
-(drawn in `OverlayWindow.swift`'s full-screen overlay, and in the panel's
-`PadView`). The real mouse/trackpad is a fully independent pointer, always,
-regardless of app state — that's required so a user can interact with
-anything else while HOVER is tracking their hand.
+**HOVER never touches the real OS cursor. Deliberate and load-bearing, not an
+oversight.** An earlier version drove the real cursor via
+`CGWarpMouseCursorPosition`, which fought real trackpad input and locked the
+user out of their own machine twice, requiring a forced shutdown both times.
+`CursorDriver.swift` was deleted entirely so it can't be silently re-wired.
+HOVER only ever moves its own on-screen ball (`OverlayWindow.swift`'s
+full-screen overlay, and the panel's `PadView`, display-only now). The real
+mouse/trackpad is a fully independent pointer, always, regardless of app
+state.
 
-There's also a hard kill switch as an unconditional backstop, independent of
-any of the app's own logic: **F12 twice within 600ms = instant `exit(0)`**
-(`AppController.swift`'s `checkForceKill`), both a local and a global key
-monitor so it works even if HOVER's window isn't focused.
+Hard kill switch, independent of any app logic: **F12 twice within 600ms =
+instant `exit(0)`** (`AppController.swift`'s `checkForceKill`), both a local
+and global key monitor.
 
-If you ever add anything that could move the real cursor or capture input
-across a large/arbitrary area again, stop and ask first — this has burned an
-entire session before.
+**If you ever add anything that could move the real cursor, or bring back a
+draggable UI element, or add any form of periodic/background readjustment to
+the ball's position — stop and ask first.** This has burned significant time
+across this session, more than once.
 
 ## What's deliberately NOT ported (dead code on Windows too)
 
 Only 4 of 12 `.cs` files in `HOVER-V2-Windows` are live (`Program.cs`,
-`HoverForm.cs`, `Native.cs`, `EdgeSolve.cs`) — `AxisMap.cs`, `Mark.cs`,
-`WireHand.cs`, `Pointer.cs`, `TargetLatch.cs`, `Homography.cs`,
-`MidiInput.cs` are never instantiated from `Program.cs`. None of that was
-ported here. Y-axis is muted throughout, matching Windows' `EnableY = false`.
+`HoverForm.cs`, `Native.cs`, `EdgeSolve.cs`) — the rest are never
+instantiated. None of that was ported here. Y-axis is muted throughout,
+matching Windows' `EnableY = false`.
 
-## Known rough edges / things to check next
-
-- The bar-dragging mechanism in `PadView` (mouse-drag the yellow bars
-  directly in the panel's small graph) still exists and works, but is no
-  longer required for normal operation — RECORD/SAVE handles calibration
-  automatically now. Treat dragging as optional fine-tuning only.
-- `OverlayWindow`'s full-screen visual can overlap the control panel
-  visually (cosmetic only, not a click-blocking issue — confirmed
-  structurally: `ignoresMouseEvents` is set once in `OverlayWindow.init` and
-  never touched again anywhere in that file) whenever `!hasXMap` — i.e.
-  before any calibration exists.
-- No `midi-debug.log`-equivalent trace file yet (Windows writes one). Add
-  one in `MidiSensor` if debugging a device that isn't detected.
-- Synthetic mouse-drag testing via this session's screenshot/computer-use
-  tooling does **not** reliably trigger real AppKit drag tracking — confirmed
-  with two different drag implementations, same non-result both times. Don't
-  trust that tool for verifying drag interactions; real hardware testing is
-  the only reliable signal for this app.
-
-## Folder
+## Folder / access
 
 Local working copy: `~/Developer/HOVER_MAC_OS`. Push access to
-`MediaNinjas/HOVER_MAC_OS` is via a GitHub token stored in this Mac's
-Keychain (git credential helper `osxkeychain`) — already configured, pushes
-should just work without re-prompting.
+`MediaNinjas/HOVER_MAC_OS` is via a GitHub token in this Mac's Keychain (git
+credential helper `osxkeychain`) — already configured.

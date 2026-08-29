@@ -195,14 +195,15 @@ final class ControlPanel: NSWindow {
     let autoBtn = NeonButton(title: "AUTO")
     let muteBtn = NeonButton(title: "MUTE")
     let monitorBtn = NeonButton(title: "MONITOR")
+    let quitBtn = NeonButton(title: "QUIT")
     let flipXCheck = NSButton(checkboxWithTitle: "FLIP X", target: nil, action: nil)
 
     let shiftSlider = NSSlider(value: 0, minValue: -50, maxValue: 50, target: nil, action: nil)
-    /// Instant sensitivity/gain, not smoothing — see Settings.mouseSpeed.
-    let mouseSpeedSlider = NSSlider(value: -20, minValue: -100, maxValue: 100, target: nil, action: nil)
+    /// Per-tick rate cap only — never a range multiplier. See Settings.mouseSpeed.
+    let mouseSpeedSlider = NSSlider(value: 0, minValue: -100, maxValue: 100, target: nil, action: nil)
 
     let shiftValue = NSTextField(labelWithString: "0")
-    let mouseSpeedValue = NSTextField(labelWithString: "-20")
+    let mouseSpeedValue = NSTextField(labelWithString: "0")
 
     let rescanBtn = NeonButton(title: "RESCAN")
     private let devicesBox = SectionBox("DEVICES")
@@ -274,6 +275,7 @@ final class ControlPanel: NSWindow {
         let tools = SectionBox("TOOLS")
         tools.body.addArrangedSubview(muteBtn)
         tools.body.addArrangedSubview(autoBtn)
+        tools.body.addArrangedSubview(quitBtn)
         tools.heightAnchor.constraint(equalToConstant: 56).isActive = true
 
         // TUNE — exactly two controls, per direct instruction.
