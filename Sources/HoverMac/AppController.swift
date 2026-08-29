@@ -582,7 +582,7 @@ final class AppController: NSObject, NSWindowDelegate {
                 if autoDirY == 0 {
                     autoDirY = dir
                     autoLegStartY = midi
-                } else if dir != autoDirY && abs(autoLastY - autoLegStartY) >= 5 {
+                } else if dir != autoDirY && abs(autoLastY - autoLegStartY) >= EdgeSolve.minMidiSpanY / 2 {
                     autoPassesY += 1
                     autoDirY = dir
                     autoLegStartY = autoLastY
@@ -600,7 +600,7 @@ final class AppController: NSObject, NSWindowDelegate {
         // entirely, both for sampling requirements and for what finishAuto
         // ends up writing.
         let xReady = !settings.enableX || (autoPasses >= EdgeSolve.minPasses && (autoMax - autoMin) >= EdgeSolve.minMidiSpan)
-        let yReady = !settings.enableY || (autoPassesY >= EdgeSolve.minPasses && (autoMaxY - autoMinY) >= EdgeSolve.minMidiSpan)
+        let yReady = !settings.enableY || (autoPassesY >= EdgeSolve.minPasses && (autoMaxY - autoMinY) >= EdgeSolve.minMidiSpanY)
         if xReady && yReady && Date() >= autoStableUntil {
             finishAuto(force: false)
         }
@@ -625,7 +625,7 @@ final class AppController: NSObject, NSWindowDelegate {
         }
 
         if settings.enableY {
-            let result = EdgeSolve.trySweep(midiMin: autoMinY, midiMax: autoMaxY, passes: autoPassesY, force: force)
+            let result = EdgeSolve.trySweep(midiMin: autoMinY, midiMax: autoMaxY, passes: autoPassesY, force: force, minSpan: EdgeSolve.minMidiSpanY)
             if let err = result.err {
                 show("Y: \(err)")
                 return
