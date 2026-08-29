@@ -201,9 +201,15 @@ final class ControlPanel: NSWindow {
     let shiftSlider = NSSlider(value: 0, minValue: -50, maxValue: 50, target: nil, action: nil)
     /// Per-tick rate cap only — never a range multiplier. See Settings.mouseSpeed.
     let mouseSpeedSlider = NSSlider(value: 0, minValue: -100, maxValue: 100, target: nil, action: nil)
+    /// How much of AUTO's measured sweep is needed to reach the edges. See Settings.rangeScale.
+    let rangeSlider = NSSlider(value: 100, minValue: 10, maxValue: 100, target: nil, action: nil)
+    /// Where the (possibly narrowed) window sits inside the measured sweep. See Settings.rangeCenter.
+    let rangeCenterSlider = NSSlider(value: 0, minValue: -100, maxValue: 100, target: nil, action: nil)
 
     let shiftValue = NSTextField(labelWithString: "0")
     let mouseSpeedValue = NSTextField(labelWithString: "0")
+    let rangeValue = NSTextField(labelWithString: "100")
+    let rangeCenterValue = NSTextField(labelWithString: "0")
 
     let rescanBtn = NeonButton(title: "RESCAN")
     private let devicesBox = SectionBox("DEVICES")
@@ -278,11 +284,13 @@ final class ControlPanel: NSWindow {
         tools.body.addArrangedSubview(quitBtn)
         tools.heightAnchor.constraint(equalToConstant: 56).isActive = true
 
-        // TUNE — exactly two controls, per direct instruction.
+        // TUNE
         let tune = SectionBox("TUNE")
         let tuneStack = NSStackView(views: [
             sliderRow("Mouse Speed", mouseSpeedSlider, mouseSpeedValue),
-            sliderRow("Center Offset", shiftSlider, shiftValue)
+            sliderRow("Center Offset", shiftSlider, shiftValue),
+            sliderRow("Range", rangeSlider, rangeValue),
+            sliderRow("Range Center", rangeCenterSlider, rangeCenterValue)
         ])
         tuneStack.orientation = .vertical
         tuneStack.alignment = .leading

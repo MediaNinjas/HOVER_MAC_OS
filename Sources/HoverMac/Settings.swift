@@ -23,6 +23,15 @@ struct Settings: Codable {
     /// calibrated extreme long enough, the ball always reaches the exact true
     /// screen edge regardless of this value. See `AppController.map()`.
     var mouseSpeed: Int = 0
+    /// How much of AUTO's measured sweep is actually needed to reach the
+    /// screen edges, as a percent of that sweep — 100 (default) = the whole
+    /// thing, same as today. Lower values let a smaller physical arc still
+    /// reach both true edges. Never widens past what AUTO actually measured.
+    var rangeScale: Int = 100
+    /// Where the (possibly narrowed) window from `rangeScale` sits inside
+    /// AUTO's measured sweep — -100...100, 0 (default) = centered. Panning
+    /// only ever moves within the measured sweep, never outside it.
+    var rangeCenter: Int = 0
 
     private enum CodingKeys: String, CodingKey {
         case shift = "Shift"
@@ -34,6 +43,29 @@ struct Settings: Codable {
         case screenBoundRight = "ScreenBoundRight"
         case mappedScreen = "MappedScreen"
         case mouseSpeed = "MouseSpeed"
+        case rangeScale = "RangeScale"
+        case rangeCenter = "RangeCenter"
+    }
+
+    init() {}
+
+    /// Custom decode so a settings file saved before a new field existed
+    /// (e.g. RangeScale/RangeCenter, added after ship) loads fine instead of
+    /// failing whole-hog and silently wiping the user's real calibration back
+    /// to defaults — every field falls back to its normal default if absent.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        shift = try c.decodeIfPresent(Int.self, forKey: .shift) ?? 0
+        flipX = try c.decodeIfPresent(Bool.self, forKey: .flipX) ?? true
+        axisMapped = try c.decodeIfPresent(Bool.self, forKey: .axisMapped) ?? false
+        axisLeft = try c.decodeIfPresent(Double.self, forKey: .axisLeft) ?? 0
+        axisRight = try c.decodeIfPresent(Double.self, forKey: .axisRight) ?? 0
+        screenBoundLeft = try c.decodeIfPresent(Double.self, forKey: .screenBoundLeft) ?? 0
+        screenBoundRight = try c.decodeIfPresent(Double.self, forKey: .screenBoundRight) ?? 1
+        mappedScreen = try c.decodeIfPresent(String.self, forKey: .mappedScreen)
+        mouseSpeed = try c.decodeIfPresent(Int.self, forKey: .mouseSpeed) ?? 0
+        rangeScale = try c.decodeIfPresent(Int.self, forKey: .rangeScale) ?? 100
+        rangeCenter = try c.decodeIfPresent(Int.self, forKey: .rangeCenter) ?? 0
     }
 
     static var fileURL: URL {
@@ -47,6 +79,8 @@ struct Settings: Codable {
         else { return Settings() }
         loaded.shift = clampInt(loaded.shift, -50, 50)
         loaded.mouseSpeed = clampInt(loaded.mouseSpeed, -100, 100)
+        loaded.rangeScale = clampInt(loaded.rangeScale, 10, 100)
+        loaded.rangeCenter = clampInt(loaded.rangeCenter, -100, 100)
         loaded.screenBoundLeft = clamp(loaded.screenBoundLeft, 0, 1)
         loaded.screenBoundRight = clamp(loaded.screenBoundRight, 0, 1)
         if loaded.screenBoundRight < loaded.screenBoundLeft {

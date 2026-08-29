@@ -149,12 +149,18 @@ final class AppController: NSObject, NSWindowDelegate {
 
         panel.mouseSpeedSlider.integerValue = settings.mouseSpeed
         panel.shiftSlider.integerValue = settings.shift
+        panel.rangeSlider.integerValue = settings.rangeScale
+        panel.rangeCenterSlider.integerValue = settings.rangeCenter
         panel.mouseSpeedValue.stringValue = "\(settings.mouseSpeed)"
         panel.shiftValue.stringValue = "\(settings.shift)"
+        panel.rangeValue.stringValue = "\(settings.rangeScale)"
+        panel.rangeCenterValue.stringValue = "\(settings.rangeCenter)"
         panel.flipXCheck.state = settings.flipX ? .on : .off
 
         panel.mouseSpeedSlider.target = self; panel.mouseSpeedSlider.action = #selector(onMouseSpeedChanged)
         panel.shiftSlider.target = self; panel.shiftSlider.action = #selector(onShiftChanged)
+        panel.rangeSlider.target = self; panel.rangeSlider.action = #selector(onRangeChanged)
+        panel.rangeCenterSlider.target = self; panel.rangeCenterSlider.action = #selector(onRangeCenterChanged)
     }
 
     @objc private func onMouseSpeedChanged() {
@@ -168,6 +174,20 @@ final class AppController: NSObject, NSWindowDelegate {
         if syncing { return }
         settings.shift = panel.shiftSlider.integerValue
         panel.shiftValue.stringValue = "\(settings.shift)"
+        settings.save()
+    }
+
+    @objc private func onRangeChanged() {
+        if syncing { return }
+        settings.rangeScale = panel.rangeSlider.integerValue
+        panel.rangeValue.stringValue = "\(settings.rangeScale)"
+        settings.save()
+    }
+
+    @objc private func onRangeCenterChanged() {
+        if syncing { return }
+        settings.rangeCenter = panel.rangeCenterSlider.integerValue
+        panel.rangeCenterValue.stringValue = "\(settings.rangeCenter)"
         settings.save()
     }
 
@@ -223,6 +243,22 @@ final class AppController: NSObject, NSWindowDelegate {
         settings.flipX ? Double(127 - raw) : Double(raw)
     }
 
+    /// Narrows AUTO's measured [left, right] sweep down to the window
+    /// `rangeScale`/`rangeCenter` select, so a smaller physical arc still
+    /// reaches both true screen edges. Always stays inside the sweep AUTO
+    /// actually measured — panning can't go past what your hand proved it
+    /// can reach, and at the defaults (100/0) this is a no-op, identical to
+    /// using the raw measured axis directly.
+    private func effectiveAxis(_ left: Double, _ right: Double) -> (Double, Double) {
+        let fullSpan = right - left
+        let mid = (left + right) / 2
+        let scale = clamp(Double(settings.rangeScale) / 100.0, 0.1, 1.0)
+        let span = fullSpan * scale
+        let headroom = (fullSpan - span) / 2
+        let center = mid + (Double(settings.rangeCenter) / 100.0) * headroom
+        return (center - span / 2, center + span / 2)
+    }
+
     /// The only function that ever sets the ball's live position. Before AUTO
     /// has ever locked a range, uses the full fixed 0...127 MIDI range as a
     /// sane default so the ball still does something reasonable.
@@ -239,8 +275,9 @@ final class AppController: NSObject, NSWindowDelegate {
     /// always arrives at the exact same target a direct 1:1 map would give.
     private func map(_ raw: Int) {
         let midi = horizontalOf(raw)
-        let axisLeft = hasXMap ? settings.axisLeft : 0
-        let axisRight = hasXMap ? settings.axisRight : 127
+        let rawAxisLeft = hasXMap ? settings.axisLeft : 0
+        let rawAxisRight = hasXMap ? settings.axisRight : 127
+        let (axisLeft, axisRight) = effectiveAxis(rawAxisLeft, rawAxisRight)
         let rawTargetX = Geometry.mappedX(midi: midi, axisLeft: axisLeft, axisRight: axisRight, screenL: yellowL, screenR: yellowR)
         let l = min(yellowL, yellowR), r = max(yellowL, yellowR)
         let targetX = clamp(rawTargetX + Double(settings.shift) / 100.0, l, r)
@@ -405,20 +442,20 @@ final class AppController: NSObject, NSWindowDelegate {
         panel.monitorLabel.stringValue = "MONITOR \(targetScreenIndex + 1)/\(NSScreen.screens.count)"
     }
 
+    /// Always visible during live tracking — an on-screen pointer that hides
+    /// itself once calibrated defeats the entire point of the app. It only
+    /// ever used to show during AUTO or before the first calibration; fixed
+    /// to also show for ordinary live use (MAPPED/MUTED), same as the
+    /// panel's own PadView already did.
     private func refreshOverlay() {
         setupOverlay()
         guard let overlay else { return }
-        let showOverlay = autoRanging || !hasXMap
-        if !showOverlay {
-            overlay.orderOut(nil)
-        } else {
-            overlay.orderFrontRegardless()
-            overlay.overlayView.ballX = px
-            overlay.overlayView.boundL = yellowL
-            overlay.overlayView.boundR = yellowR
-            overlay.overlayView.prompt = nil
-            overlay.overlayView.refresh()
-        }
+        overlay.orderFrontRegardless()
+        overlay.overlayView.ballX = px
+        overlay.overlayView.boundL = yellowL
+        overlay.overlayView.boundR = yellowR
+        overlay.overlayView.prompt = nil
+        overlay.overlayView.refresh()
         refreshPad()
     }
 
