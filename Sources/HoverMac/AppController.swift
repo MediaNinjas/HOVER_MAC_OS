@@ -693,6 +693,11 @@ final class AppController: NSObject, NSWindowDelegate {
         }
 
         if detectPhase != .idle {
+            // The ball has to keep moving live during capture, exactly like
+            // normal tracking — otherwise it looks frozen/broken for the
+            // entire window, which is exactly what was happening here.
+            if settings.enableX { map(rawValueForX()) }
+            if settings.enableY { mapY(rawValueForY()) }
             sampleDetect()
             updateDetectButtonTitles()
             refreshSourceOptionsIfNeeded()
@@ -733,6 +738,32 @@ final class AppController: NSObject, NSWindowDelegate {
 
     private func resyncSourceMenus() {
         panel.setSourceOptions(lastKnownCCSet.sorted(), selectedX: settings.xSourceCC, selectedY: settings.ySourceCC)
+    }
+
+    /// Actually locks the calibration — sets the measured range as the
+    /// screen-edge-to-edge axis, same as AUTO's own lock does. Picking a
+    /// source CC without this was the actual gap: RECORD/FIND AXES were only
+    /// ever choosing *which* CC to use, never scaling its range to the
+    /// screen, so the ball kept using whatever old (or no) calibration
+    /// existed for a completely different CC.
+    private func lockXCalibration(_ range: (min: Double, max: Double)) {
+        settings.axisLeft = range.min
+        settings.axisRight = range.max
+        settings.axisMapped = true
+        settings.screenBoundLeft = 0
+        settings.screenBoundRight = 1
+        yellowL = 0
+        yellowR = 1
+    }
+
+    private func lockYCalibration(_ range: (min: Double, max: Double)) {
+        settings.axisTop = range.min
+        settings.axisBottom = range.max
+        settings.axisMappedY = true
+        settings.screenBoundTop = 0
+        settings.screenBoundBottom = 1
+        yellowTop = 0
+        yellowBottom = 1
     }
 
     private func detectSecsLeft() -> Int {
@@ -788,6 +819,7 @@ final class AppController: NSObject, NSWindowDelegate {
                 return
             }
             settings.xSourceCC = winner.key
+            lockXCalibration(winner.value)
             settings.save()
             resyncSourceMenus()
             detectPhase = .vertical
@@ -801,6 +833,7 @@ final class AppController: NSObject, NSWindowDelegate {
                 return
             }
             settings.ySourceCC = winner.key
+            lockYCalibration(winner.value)
             settings.save()
             resyncSourceMenus()
             cancelDetect()
@@ -812,10 +845,12 @@ final class AppController: NSObject, NSWindowDelegate {
                 return
             }
             settings.xSourceCC = winner.key
+            lockXCalibration(winner.value)
             settings.save()
             resyncSourceMenus()
             cancelDetect()
-            show("RECORD X · done — X=CC\(winner.key)")
+            map(rawValueForX())
+            show("RECORD X · done — X=CC\(winner.key) (\(Int(winner.value.min))-\(Int(winner.value.max)))")
         case .recordY:
             guard !notEnoughMovement, let winner else {
                 show("RECORD Y · didn't see enough movement, try again")
@@ -823,10 +858,12 @@ final class AppController: NSObject, NSWindowDelegate {
                 return
             }
             settings.ySourceCC = winner.key
+            lockYCalibration(winner.value)
             settings.save()
             resyncSourceMenus()
             cancelDetect()
-            show("RECORD Y · done — Y=CC\(winner.key)")
+            mapY(rawValueForY())
+            show("RECORD Y · done — Y=CC\(winner.key) (\(Int(winner.value.min))-\(Int(winner.value.max)))")
         case .idle:
             break
         }
