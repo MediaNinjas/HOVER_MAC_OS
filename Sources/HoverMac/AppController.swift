@@ -72,6 +72,18 @@ final class AppController: NSObject, NSWindowDelegate {
     private var rawCCs: [Int: Int] = [:]
     private var lastKnownCCSet: Set<Int> = []
 
+    /// FIND AXES: walks the user through one deliberate horizontal sweep,
+    /// then one deliberate vertical sweep, and assigns whichever raw CC moved
+    /// the most during each window — no MIDI/CC knowledge required from them.
+    private enum DetectPhase { case idle, horizontal, vertical }
+    private var detectPhase: DetectPhase = .idle
+    private var detectPhaseStart = Date.distantPast
+    private var detectRanges: [Int: (min: Double, max: Double)] = [:]
+    private let detectDuration: TimeInterval = 2.5
+    /// Below this raw MIDI swing, a "winner" isn't trusted — avoids locking
+    /// onto sensor noise if the user didn't actually move during the window.
+    private let detectMinSwing: Double = 8
+
     // MIDI reconnect throttle — retry every 2s while disconnected, not every tick.
     private var nextConnectAttempt = Date.distantPast
 
@@ -195,6 +207,10 @@ final class AppController: NSObject, NSWindowDelegate {
         panel.xSourceMenu.action = #selector(onXSourceChanged)
         panel.ySourceMenu.target = self
         panel.ySourceMenu.action = #selector(onYSourceChanged)
+        panel.detectBtn.target = self
+        panel.detectBtn.action = #selector(onDetectTapped)
+        panel.swapBtn.target = self
+        panel.swapBtn.action = #selector(onSwapTapped)
         panel.rescanBtn.target = self
         panel.rescanBtn.action = #selector(onRescanTapped)
         panel.onDeviceToggled = { [weak self] name, enabled in
@@ -294,13 +310,41 @@ final class AppController: NSObject, NSWindowDelegate {
         settings.save()
     }
 
+    /// Swaps which raw CC drives X vs Y — quick fix if FIND AXES (or a
+    /// manual pick) comes out backwards, without redoing detection.
+    @objc private func onSwapTapped() {
+        swap(&settings.xSourceCC, &settings.ySourceCC)
+        settings.save()
+        resyncSourceMenus()
+        show("SOURCES · swapped X/Y")
+    }
+
+    @objc private func onDetectTapped() {
+        if detectPhase != .idle {
+            detectPhase = .idle
+            panel.detectBtn.title = "FIND AXES"
+            showStatus()
+            return
+        }
+        guard sensor.connected else { return }
+        if autoRanging { cancelAuto() }
+        detectPhase = .horizontal
+        detectPhaseStart = Date()
+        detectRanges = [:]
+        panel.detectBtn.title = "CANCEL"
+        show("FIND AXES · move hand LEFT-RIGHT now")
+    }
+
     @objc private func onMuteTapped() { toggleMute() }
     @objc private func onMonitorTapped() { switchMonitor() }
     @objc private func onRescanTapped() {
         sensor.rescan()
         showStatus()
     }
-    @objc private func onAutoTapped() { autoRanging ? cancelAuto() : startAuto() }
+    @objc private func onAutoTapped() {
+        if detectPhase != .idle { return }
+        autoRanging ? cancelAuto() : startAuto()
+    }
     @objc private func onQuitTapped() { NSApp.terminate(nil) }
 
     /// The overlay window is always open on its own, so the panel is never
@@ -618,6 +662,14 @@ final class AppController: NSObject, NSWindowDelegate {
             return
         }
 
+        if detectPhase != .idle {
+            sampleDetect()
+            refreshSourceOptionsIfNeeded()
+            showStatus()
+            refreshOverlay()
+            return
+        }
+
         // MUTE freezes HOVER's own ball in place — it does not touch the real
         // cursor either way (that's never touched), it just stops updating
         // from hand data. map()/mapY() are the only functions that can ever
@@ -642,10 +694,69 @@ final class AppController: NSObject, NSWindowDelegate {
         let ccSet = Set(rawCCs.keys)
         if ccSet != lastKnownCCSet {
             lastKnownCCSet = ccSet
-            panel.setSourceOptions(ccSet.sorted(), selectedX: settings.xSourceCC, selectedY: settings.ySourceCC)
+            resyncSourceMenus()
         }
         let text = rawCCs.sorted { $0.key < $1.key }.map { "CC\($0.key):\($0.value)" }.joined(separator: "  ")
         panel.setRawCCText(text.isEmpty ? "no raw CC traffic yet" : text)
+    }
+
+    private func resyncSourceMenus() {
+        panel.setSourceOptions(lastKnownCCSet.sorted(), selectedX: settings.xSourceCC, selectedY: settings.ySourceCC)
+    }
+
+    /// One window watching for horizontal movement, then one watching for
+    /// vertical — whichever raw CC swung the most in each window wins that
+    /// axis. No CC numbers or MIDI knowledge required from the user at all.
+    private func sampleDetect() {
+        for (cc, v) in rawCCs {
+            let dv = Double(v)
+            if let r = detectRanges[cc] {
+                detectRanges[cc] = (min(r.min, dv), max(r.max, dv))
+            } else {
+                detectRanges[cc] = (dv, dv)
+            }
+        }
+        guard Date().timeIntervalSince(detectPhaseStart) >= detectDuration else { return }
+
+        // While picking Y, ignore whatever CC just won X — a real second axis
+        // should win on its own merits, not by riding X's already-large swing.
+        let excluded = detectPhase == .vertical ? settings.xSourceCC : nil
+        let winner = detectRanges
+            .filter { $0.key != excluded }
+            .max(by: { ($0.value.max - $0.value.min) < ($1.value.max - $1.value.min) })
+        let swing = winner.map { $0.value.max - $0.value.min } ?? 0
+
+        switch detectPhase {
+        case .horizontal:
+            guard let winner, swing >= detectMinSwing else {
+                show("FIND AXES · didn't see enough movement, try again")
+                detectPhase = .idle
+                panel.detectBtn.title = "FIND AXES"
+                return
+            }
+            settings.xSourceCC = winner.key
+            settings.save()
+            resyncSourceMenus()
+            detectPhase = .vertical
+            detectPhaseStart = Date()
+            detectRanges = [:]
+            show("FIND AXES · now move hand UP-DOWN")
+        case .vertical:
+            guard let winner, swing >= detectMinSwing else {
+                show("FIND AXES · didn't see enough movement, try again")
+                detectPhase = .idle
+                panel.detectBtn.title = "FIND AXES"
+                return
+            }
+            settings.ySourceCC = winner.key
+            settings.save()
+            resyncSourceMenus()
+            detectPhase = .idle
+            panel.detectBtn.title = "FIND AXES"
+            show("FIND AXES · done — X=CC\(settings.xSourceCC.map(String.init) ?? "?") Y=CC\(winner.key)")
+        case .idle:
+            break
+        }
     }
 
     // MARK: - Status / overlay
@@ -665,6 +776,8 @@ final class AppController: NSObject, NSWindowDelegate {
             else if autoRanging {
                 panel.statusLabel.stringValue = "AUTO · X \(autoPasses)/\(EdgeSolve.minPasses)  Y \(autoPassesY)/\(EdgeSolve.minPasses)"
             }
+            else if detectPhase == .horizontal { panel.statusLabel.stringValue = "FIND AXES · move LEFT-RIGHT" }
+            else if detectPhase == .vertical { panel.statusLabel.stringValue = "FIND AXES · move UP-DOWN" }
             else if muted { panel.statusLabel.stringValue = "MUTED" }
             else if !settings.enableX && !settings.enableY { panel.statusLabel.stringValue = "OFF" }
             else if (!settings.enableX || hasXMap) && (!settings.enableY || hasYMap) { panel.statusLabel.stringValue = "MAPPED" }

@@ -211,6 +211,11 @@ final class ControlPanel: NSWindow {
     /// "Default" keeps the normal built-in grouping.
     let xSourceMenu = NSPopUpButton()
     let ySourceMenu = NSPopUpButton()
+    /// Walks you through it hands-free: move left-right, then up-down, and
+    /// picks the CC with the most movement in each window automatically.
+    let detectBtn = NeonButton(title: "FIND AXES")
+    /// Quick fix if FIND AXES (or a manual pick) comes out backwards.
+    let swapBtn = NeonButton(title: "SWAP X/Y")
     /// Every raw CC number and its current value, refreshed live — lets a
     /// gesture be matched to its CC number by eye, no code changes needed.
     let rawCCLabel = NSTextField(labelWithString: "")
@@ -338,6 +343,9 @@ final class ControlPanel: NSWindow {
         // a live readout of every CC number the hardware sends, so a natural
         // gesture's CC can be spotted and assigned without guessing.
         let sources = SectionBox("SOURCES")
+        let detectRow = NSStackView(views: [detectBtn, swapBtn])
+        detectRow.orientation = .horizontal
+        detectRow.spacing = 10
         xSourceMenu.font = mono(10)
         ySourceMenu.font = mono(10)
         xSourceMenu.widthAnchor.constraint(equalToConstant: 130).isActive = true
@@ -354,6 +362,7 @@ final class ControlPanel: NSWindow {
         rawCCLabel.maximumNumberOfLines = 3
         rawCCLabel.preferredMaxLayoutWidth = 380
         let sourcesStack = NSStackView(views: [
+            detectRow,
             NSStackView(views: [xSourceLabel, xSourceMenu]),
             NSStackView(views: [ySourceLabel, ySourceMenu]),
             rawCCLabel
