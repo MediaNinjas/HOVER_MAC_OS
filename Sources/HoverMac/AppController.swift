@@ -1,13 +1,17 @@
 import AppKit
 
-/// Orchestrates everything. X-axis only (Y stays muted, matching the Windows
-/// build's `EnableY = false`).
+/// Orchestrates everything. X and Y are both live now — deliberately kept as
+/// two fully separate code paths (separate MIDI CCs, separate settings,
+/// separate AUTO state, separate map()/mapY() functions) rather than one
+/// generic shared implementation, so a change to one can never silently
+/// affect the other. ENABLE X / ENABLE Y let you turn either off entirely to
+/// isolate and tune the other on its own.
 ///
-/// Deliberately minimal, per direct instruction: only AUTO calibration (it
-/// works), MUTE, DEVICES, and two sliders (Mouse Speed, Center Offset) exist
-/// here now. RECORD/SAVE/MAP/CENTER and their whole state machine were
-/// removed entirely rather than kept as unused/confusing dead weight — they
-/// were unreliable across many attempts and are not needed for AUTO to work.
+/// Deliberately minimal otherwise, per direct instruction: AUTO calibration,
+/// MUTE, DEVICES, and a small TUNE section. RECORD/SAVE/MAP/CENTER and their
+/// whole state machine were removed entirely rather than kept as
+/// unused/confusing dead weight — they were unreliable across many attempts
+/// and are not needed for AUTO to work.
 ///
 /// HOVER never drives the real OS cursor. It only moves its own on-screen
 /// pointer (the ball, drawn in `OverlayWindow`/`ControlPanel`'s `padView`).
@@ -25,9 +29,12 @@ final class AppController: NSObject, NSWindowDelegate {
     private var targetScreenIndex = 0
     private var overlayScreenName: String?
 
-    // Pointer state.
+    // Pointer state — X.
     private var rawX = 64
     private var px = 0.5
+    // Pointer state — Y. Kept fully separate from the X fields above.
+    private var rawY = 64
+    private var py = 0.5
     /// MUTE freezes HOVER's own ball/pointer (stops updating from hand data). It has
     /// nothing to do with the real OS cursor — HOVER never touches that, ever.
     private var muted = false
@@ -38,8 +45,10 @@ final class AppController: NSObject, NSWindowDelegate {
     /// re-adjustment, nothing "pulls" on this after it's set.
     private var yellowL = 0.0
     private var yellowR = 1.0
+    private var yellowTop = 0.0
+    private var yellowBottom = 1.0
 
-    // AUTO ranging.
+    // AUTO ranging — X.
     private var autoRanging = false
     private var autoMin = 127.0
     private var autoMax = 0.0
@@ -48,6 +57,14 @@ final class AppController: NSObject, NSWindowDelegate {
     private var autoLegStart = 0.0
     private var autoPasses = 0
     private var autoStableUntil = Date.distantPast
+    // AUTO ranging — Y. Same shape as the X fields above, sampled/locked
+    // completely separately.
+    private var autoMinY = 127.0
+    private var autoMaxY = 0.0
+    private var autoLastY = 0.0
+    private var autoDirY = 0
+    private var autoLegStartY = 0.0
+    private var autoPassesY = 0
 
     // MIDI reconnect throttle — retry every 2s while disconnected, not every tick.
     private var nextConnectAttempt = Date.distantPast
@@ -62,10 +79,13 @@ final class AppController: NSObject, NSWindowDelegate {
     private var lastF12Press = Date.distantPast
 
     var hasXMap: Bool { settings.axisMapped && abs(settings.axisRight - settings.axisLeft) >= 6 }
+    var hasYMap: Bool { settings.axisMappedY && abs(settings.axisBottom - settings.axisTop) >= 6 }
 
     func start() {
         yellowL = clamp(settings.screenBoundLeft, 0, 1)
         yellowR = clamp(settings.screenBoundRight, 0, 1)
+        yellowTop = clamp(settings.screenBoundTop, 0, 1)
+        yellowBottom = clamp(settings.screenBoundBottom, 0, 1)
         setupOverlay()
         wireUI()
         panel.delegate = self
@@ -74,6 +94,7 @@ final class AppController: NSObject, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
 
         sensor.onSample = { [weak self] x in self?.rawX = x }
+        sensor.onSampleY = { [weak self] y in self?.rawY = y }
         sensor.onDevicesChanged = { [weak self] in
             guard let self else { return }
             panel.setDevices(sensor.devices)
@@ -141,6 +162,12 @@ final class AppController: NSObject, NSWindowDelegate {
         panel.quitBtn.action = #selector(onQuitTapped)
         panel.flipXCheck.target = self
         panel.flipXCheck.action = #selector(onFlipXChanged)
+        panel.flipYCheck.target = self
+        panel.flipYCheck.action = #selector(onFlipYChanged)
+        panel.enableXCheck.target = self
+        panel.enableXCheck.action = #selector(onEnableXChanged)
+        panel.enableYCheck.target = self
+        panel.enableYCheck.action = #selector(onEnableYChanged)
         panel.rescanBtn.target = self
         panel.rescanBtn.action = #selector(onRescanTapped)
         panel.onDeviceToggled = { [weak self] name, enabled in
@@ -156,6 +183,9 @@ final class AppController: NSObject, NSWindowDelegate {
         panel.rangeValue.stringValue = "\(settings.rangeScale)"
         panel.rangeCenterValue.stringValue = "\(settings.rangeCenter)"
         panel.flipXCheck.state = settings.flipX ? .on : .off
+        panel.flipYCheck.state = settings.flipY ? .on : .off
+        panel.enableXCheck.state = settings.enableX ? .on : .off
+        panel.enableYCheck.state = settings.enableY ? .on : .off
 
         panel.mouseSpeedSlider.target = self; panel.mouseSpeedSlider.action = #selector(onMouseSpeedChanged)
         panel.shiftSlider.target = self; panel.shiftSlider.action = #selector(onShiftChanged)
@@ -193,6 +223,26 @@ final class AppController: NSObject, NSWindowDelegate {
 
     @objc private func onFlipXChanged() {
         settings.flipX = panel.flipXCheck.state == .on
+        settings.save()
+    }
+
+    @objc private func onFlipYChanged() {
+        settings.flipY = panel.flipYCheck.state == .on
+        settings.save()
+    }
+
+    /// Disabling an axis freezes its half of the ball dead center (0.5) so
+    /// it's out of the way visually while you isolate the other axis — it
+    /// does not erase that axis's calibration, just stops it from moving.
+    @objc private func onEnableXChanged() {
+        settings.enableX = panel.enableXCheck.state == .on
+        if !settings.enableX { px = 0.5 }
+        settings.save()
+    }
+
+    @objc private func onEnableYChanged() {
+        settings.enableY = panel.enableYCheck.state == .on
+        if !settings.enableY { py = 0.5 }
         settings.save()
     }
 
@@ -243,6 +293,10 @@ final class AppController: NSObject, NSWindowDelegate {
         settings.flipX ? Double(127 - raw) : Double(raw)
     }
 
+    private func verticalOf(_ raw: Int) -> Double {
+        settings.flipY ? Double(127 - raw) : Double(raw)
+    }
+
     /// Narrows AUTO's measured [left, right] sweep down to the window
     /// `rangeScale`/`rangeCenter` select, so a smaller physical arc still
     /// reaches both true screen edges. Always stays inside the sweep AUTO
@@ -290,6 +344,36 @@ final class AppController: NSObject, NSWindowDelegate {
         px = clamp(px + delta, l, r)
     }
 
+    /// Y's own copy of `effectiveAxis` — deliberately not shared with X's, so
+    /// nothing about X's behavior can change if this one is ever edited.
+    private func effectiveAxisY(_ top: Double, _ bottom: Double) -> (Double, Double) {
+        let fullSpan = bottom - top
+        let mid = (top + bottom) / 2
+        let scale = clamp(Double(settings.rangeScale) / 100.0, 0.1, 1.0)
+        let span = fullSpan * scale
+        let headroom = (fullSpan - span) / 2
+        let center = mid + (Double(settings.rangeCenter) / 100.0) * headroom
+        return (center - span / 2, center + span / 2)
+    }
+
+    /// Y's own copy of `map()` — sets `py` only, never touches `px`. Same
+    /// direct-1:1-at-0/rate-cap-below-0 Mouse Speed behavior as X, kept as a
+    /// fully separate function on purpose.
+    private func mapY(_ raw: Int) {
+        let midi = verticalOf(raw)
+        let rawAxisTop = hasYMap ? settings.axisTop : 0
+        let rawAxisBottom = hasYMap ? settings.axisBottom : 127
+        let (axisTop, axisBottom) = effectiveAxisY(rawAxisTop, rawAxisBottom)
+        let rawTargetY = Geometry.mappedX(midi: midi, axisLeft: axisTop, axisRight: axisBottom, screenL: yellowTop, screenR: yellowBottom)
+        let t = min(yellowTop, yellowBottom), b = max(yellowTop, yellowBottom)
+        let targetY = clamp(rawTargetY, t, b)
+
+        let speed = min(0, settings.mouseSpeed)
+        let maxStep = speed == 0 ? 1.0 : max(0.004, 1.0 + Double(speed) / 100.0)
+        let delta = clamp(targetY - py, -maxStep, maxStep)
+        py = clamp(py + delta, t, b)
+    }
+
     private func toggleMute() { muteHover(!muted) }
 
     private func muteHover(_ value: Bool) {
@@ -302,6 +386,10 @@ final class AppController: NSObject, NSWindowDelegate {
 
     private func startAuto() {
         guard sensor.connected else { return }
+        guard settings.enableX || settings.enableY else {
+            show("enable X or Y before AUTO")
+            return
+        }
         autoRanging = true
         autoMin = horizontalOf(rawX)
         autoMax = autoMin
@@ -309,9 +397,15 @@ final class AppController: NSObject, NSWindowDelegate {
         autoDir = 0
         autoLegStart = autoMin
         autoPasses = 0
+        autoMinY = verticalOf(rawY)
+        autoMaxY = autoMinY
+        autoLastY = autoMinY
+        autoDirY = 0
+        autoLegStartY = autoMinY
+        autoPassesY = 0
         autoStableUntil = Date().addingTimeInterval(1.1)
         panel.autoBtn.title = "CANCEL"
-        show("AUTO · sweep left and right, enter to lock")
+        show("AUTO · sweep enabled axes, enter to lock")
     }
 
     private func cancelAuto() {
@@ -323,52 +417,118 @@ final class AppController: NSObject, NSWindowDelegate {
     }
 
     private func sampleAuto() {
-        let midi = horizontalOf(rawX)
         var grew = false
-        if midi < autoMin { autoMin = midi; grew = true }
-        if midi > autoMax { autoMax = midi; grew = true }
-        if grew { autoStableUntil = Date().addingTimeInterval(1.1) }
 
-        let delta = midi - autoLast
-        if abs(delta) >= 1.5 {
-            let dir = delta < 0 ? -1 : 1
-            if autoDir == 0 {
-                autoDir = dir
-                autoLegStart = midi
-            } else if dir != autoDir && abs(autoLast - autoLegStart) >= 5 {
-                autoPasses += 1
-                autoDir = dir
-                autoLegStart = autoLast
+        if settings.enableX {
+            let midi = horizontalOf(rawX)
+            if midi < autoMin { autoMin = midi; grew = true }
+            if midi > autoMax { autoMax = midi; grew = true }
+
+            let delta = midi - autoLast
+            if abs(delta) >= 1.5 {
+                let dir = delta < 0 ? -1 : 1
+                if autoDir == 0 {
+                    autoDir = dir
+                    autoLegStart = midi
+                } else if dir != autoDir && abs(autoLast - autoLegStart) >= 5 {
+                    autoPasses += 1
+                    autoDir = dir
+                    autoLegStart = autoLast
+                }
+                autoLast = midi
             }
-            autoLast = midi
+
+            let span = autoMax - autoMin
+            px = span < 1 ? 0.5 : clamp((midi - autoMin) / span, 0, 1)
         }
 
-        let span = autoMax - autoMin
-        px = span < 1 ? 0.5 : clamp((midi - autoMin) / span, 0, 1)
+        if settings.enableY {
+            let midi = verticalOf(rawY)
+            if midi < autoMinY { autoMinY = midi; grew = true }
+            if midi > autoMaxY { autoMaxY = midi; grew = true }
 
-        if autoPasses >= EdgeSolve.minPasses && span >= EdgeSolve.minMidiSpan && Date() >= autoStableUntil {
+            let delta = midi - autoLastY
+            if abs(delta) >= 1.5 {
+                let dir = delta < 0 ? -1 : 1
+                if autoDirY == 0 {
+                    autoDirY = dir
+                    autoLegStartY = midi
+                } else if dir != autoDirY && abs(autoLastY - autoLegStartY) >= 5 {
+                    autoPassesY += 1
+                    autoDirY = dir
+                    autoLegStartY = autoLastY
+                }
+                autoLastY = midi
+            }
+
+            let spanY = autoMaxY - autoMinY
+            py = spanY < 1 ? 0.5 : clamp((midi - autoMinY) / spanY, 0, 1)
+        }
+
+        if grew { autoStableUntil = Date().addingTimeInterval(1.1) }
+
+        // Only enabled axes gate the lock — a disabled axis is skipped
+        // entirely, both for sampling requirements and for what finishAuto
+        // ends up writing.
+        let xReady = !settings.enableX || (autoPasses >= EdgeSolve.minPasses && (autoMax - autoMin) >= EdgeSolve.minMidiSpan)
+        let yReady = !settings.enableY || (autoPassesY >= EdgeSolve.minPasses && (autoMaxY - autoMinY) >= EdgeSolve.minMidiSpan)
+        if xReady && yReady && Date() >= autoStableUntil {
             finishAuto(force: false)
         }
     }
 
     private func finishAuto(force: Bool) {
         guard autoRanging else { return }
-        let result = EdgeSolve.trySweep(midiMin: autoMin, midiMax: autoMax, passes: autoPasses, force: force)
-        if let err = result.err {
-            show(err)
-            return
+        var lockedX = false
+        var lockedY = false
+        var lockedXLeft = 0.0, lockedXRight = 0.0
+        var lockedYTop = 0.0, lockedYBottom = 0.0
+
+        if settings.enableX {
+            let result = EdgeSolve.trySweep(midiMin: autoMin, midiMax: autoMax, passes: autoPasses, force: force)
+            if let err = result.err {
+                show("X: \(err)")
+                return
+            }
+            lockedXLeft = result.axisLeft
+            lockedXRight = result.axisRight
+            lockedX = true
         }
-        settings.axisLeft = result.axisLeft
-        settings.axisRight = result.axisRight
-        settings.axisMapped = true
-        // Always the true screen edges, every time AUTO locks — this was the
-        // actual bug behind "space between MIDI 0 and the side": these were
-        // never being set here at all, so the screen boundary silently stayed
-        // whatever stale value happened to be left over.
-        settings.screenBoundLeft = 0
-        settings.screenBoundRight = 1
-        yellowL = 0
-        yellowR = 1
+
+        if settings.enableY {
+            let result = EdgeSolve.trySweep(midiMin: autoMinY, midiMax: autoMaxY, passes: autoPassesY, force: force)
+            if let err = result.err {
+                show("Y: \(err)")
+                return
+            }
+            lockedYTop = result.axisLeft
+            lockedYBottom = result.axisRight
+            lockedY = true
+        }
+
+        if lockedX {
+            settings.axisLeft = lockedXLeft
+            settings.axisRight = lockedXRight
+            settings.axisMapped = true
+            // Always the true screen edges, every time AUTO locks — this was the
+            // actual bug behind "space between MIDI 0 and the side": these were
+            // never being set here at all, so the screen boundary silently stayed
+            // whatever stale value happened to be left over.
+            settings.screenBoundLeft = 0
+            settings.screenBoundRight = 1
+            yellowL = 0
+            yellowR = 1
+        }
+        if lockedY {
+            settings.axisTop = lockedYTop
+            settings.axisBottom = lockedYBottom
+            settings.axisMappedY = true
+            settings.screenBoundTop = 0
+            settings.screenBoundBottom = 1
+            yellowTop = 0
+            yellowBottom = 1
+        }
+
         settings.shift = 0
         settings.mappedScreen = screenName(targetScreen)
         settings.save()
@@ -380,8 +540,12 @@ final class AppController: NSObject, NSWindowDelegate {
         // No re-adjustment of any kind after this — what AUTO measured is what
         // gets used, permanently, until you run AUTO again. Per direct
         // instruction: nothing pulls on the mapping after it's set.
-        map(rawX)
-        show("locked · \(Int(result.axisLeft))-\(Int(result.axisRight))")
+        if lockedX { map(rawX) }
+        if lockedY { mapY(rawY) }
+        var parts: [String] = []
+        if lockedX { parts.append("X \(Int(lockedXLeft))-\(Int(lockedXRight))") }
+        if lockedY { parts.append("Y \(Int(lockedYTop))-\(Int(lockedYBottom))") }
+        show("locked · " + parts.joined(separator: "  "))
     }
 
     // MARK: - Tick
@@ -407,10 +571,12 @@ final class AppController: NSObject, NSWindowDelegate {
 
         // MUTE freezes HOVER's own ball in place — it does not touch the real
         // cursor either way (that's never touched), it just stops updating
-        // from hand data. This is the ONLY function that can ever set px
-        // during live tracking, full stop.
+        // from hand data. map()/mapY() are the only functions that can ever
+        // set px/py during live tracking, full stop. A disabled axis is
+        // pinned to center instead of being left at whatever it last was.
         if !muted {
-            map(rawX)
+            if settings.enableX { map(rawX) } else { px = 0.5 }
+            if settings.enableY { mapY(rawY) } else { py = 0.5 }
         }
 
         showStatus()
@@ -431,14 +597,19 @@ final class AppController: NSObject, NSWindowDelegate {
         } else {
             self.notice = nil
             if !sensor.connected { panel.statusLabel.stringValue = sensor.status }
-            else if autoRanging { panel.statusLabel.stringValue = "AUTO X · \(autoPasses)/\(EdgeSolve.minPasses)" }
+            else if autoRanging {
+                panel.statusLabel.stringValue = "AUTO · X \(autoPasses)/\(EdgeSolve.minPasses)  Y \(autoPassesY)/\(EdgeSolve.minPasses)"
+            }
             else if muted { panel.statusLabel.stringValue = "MUTED" }
-            else if hasXMap { panel.statusLabel.stringValue = "MAPPED" }
+            else if !settings.enableX && !settings.enableY { panel.statusLabel.stringValue = "OFF" }
+            else if (!settings.enableX || hasXMap) && (!settings.enableY || hasYMap) { panel.statusLabel.stringValue = "MAPPED" }
             else { panel.statusLabel.stringValue = "READY" }
         }
         let lPct = Int((yellowL * 100).rounded())
         let rPct = Int((yellowR * 100).rounded())
-        panel.readoutLabel.stringValue = "X  \(rawX)     Y  MUTE     L\(lPct)% R\(rPct)%"
+        let tPct = Int((yellowTop * 100).rounded())
+        let bPct = Int((yellowBottom * 100).rounded())
+        panel.readoutLabel.stringValue = "X  \(rawX)   Y  \(rawY)     L\(lPct)% R\(rPct)%  T\(tPct)% B\(bPct)%"
         panel.monitorLabel.stringValue = "MONITOR \(targetScreenIndex + 1)/\(NSScreen.screens.count)"
     }
 
@@ -452,6 +623,7 @@ final class AppController: NSObject, NSWindowDelegate {
         guard let overlay else { return }
         overlay.orderFrontRegardless()
         overlay.overlayView.ballX = px
+        overlay.overlayView.ballY = py
         overlay.overlayView.boundL = yellowL
         overlay.overlayView.boundR = yellowR
         overlay.overlayView.prompt = nil
@@ -461,7 +633,10 @@ final class AppController: NSObject, NSWindowDelegate {
 
     private func refreshPad() {
         panel.padView.x = px
-        panel.padView.y = 0.5
+        // PadView is bottom-left origin; py is top-left (0 = top, matching the
+        // full-screen overlay), so it needs the same flip FLIP X gets nowhere
+        // near — this is purely a coordinate-space conversion for display.
+        panel.padView.y = 1 - py
         panel.padView.yellowL = yellowL
         panel.padView.yellowR = yellowR
         let mid = (yellowL + yellowR) / 2

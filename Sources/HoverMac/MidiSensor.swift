@@ -8,8 +8,7 @@ struct MidiDeviceInfo {
     var enabled: Bool
 }
 
-/// Reads the Hot Hand's CC7/4/9 (X axis) over CoreMIDI. Y (CC5/8) is intentionally
-/// ignored — this mirrors the Windows build's `EnableY = false` (X-only pass).
+/// Reads the Hot Hand's CC7/4/9 (X axis) and CC5/8 (Y axis) over CoreMIDI.
 ///
 /// Lists every MIDI source it can see (not just ones that look like a Hot Hand),
 /// so the DEVICES panel can show all of them with an on/off checkbox each. A
@@ -32,7 +31,11 @@ final class MidiSensor {
 
     /// Latest raw X value, 0...127.
     private(set) var lastX: Int = 64
+    /// Latest raw Y value, 0...127. Kept fully separate from X below — its own
+    /// CC numbers, its own stored field — so nothing about X's handling changes.
+    private(set) var lastY: Int = 64
     var onSample: ((Int) -> Void)?
+    var onSampleY: ((Int) -> Void)?
     /// Fires whenever the device list or any device's enabled state changes, so the
     /// UI can rebuild the DEVICES checkbox list.
     var onDevicesChanged: (() -> Void)?
@@ -185,13 +188,22 @@ final class MidiSensor {
                 if (status & 0xF0) == 0xB0 {
                     let cc = Int(bytes[i + 1])
                     let value = Int(bytes[i + 2])
-                    // Hot Hand: CC 4/7/9 = X only. CC 5/8 (Y) intentionally ignored.
+                    // Hot Hand: CC 4/7/9 = X. CC 5/8 = Y. Handled as two fully
+                    // separate branches, each firing only its own callback —
+                    // an X sample never touches lastY/onSampleY or vice versa.
                     if cc == 4 || cc == 7 || cc == 9 {
                         lastX = value
                         lastSampleAt = Date()
                         DispatchQueue.main.async { [weak self] in
                             guard let self else { return }
                             self.onSample?(self.lastX)
+                        }
+                    } else if cc == 5 || cc == 8 {
+                        lastY = value
+                        lastSampleAt = Date()
+                        DispatchQueue.main.async { [weak self] in
+                            guard let self else { return }
+                            self.onSampleY?(self.lastY)
                         }
                     }
                     i += 3

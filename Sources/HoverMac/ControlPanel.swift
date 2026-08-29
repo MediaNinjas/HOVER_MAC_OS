@@ -197,6 +197,11 @@ final class ControlPanel: NSWindow {
     let monitorBtn = NeonButton(title: "MONITOR")
     let quitBtn = NeonButton(title: "QUIT")
     let flipXCheck = NSButton(checkboxWithTitle: "FLIP X", target: nil, action: nil)
+    let flipYCheck = NSButton(checkboxWithTitle: "FLIP Y", target: nil, action: nil)
+    /// Independent on/off per axis — lets you isolate Y (or X) to test/tune
+    /// it alone without the other axis moving the ball at all.
+    let enableXCheck = NSButton(checkboxWithTitle: "ENABLE X", target: nil, action: nil)
+    let enableYCheck = NSButton(checkboxWithTitle: "ENABLE Y", target: nil, action: nil)
 
     let shiftSlider = NSSlider(value: 0, minValue: -50, maxValue: 50, target: nil, action: nil)
     /// Per-tick rate cap only — never a range multiplier. See Settings.mouseSpeed.
@@ -301,8 +306,17 @@ final class ControlPanel: NSWindow {
 
         flipXCheck.attributedTitle = checkboxTitle("FLIP X")
         flipXCheck.state = .on
+        flipYCheck.attributedTitle = checkboxTitle("FLIP Y")
+        enableXCheck.attributedTitle = checkboxTitle("ENABLE X")
+        enableXCheck.state = .on
+        enableYCheck.attributedTitle = checkboxTitle("ENABLE Y")
+        enableYCheck.state = .on
 
-        let bottomRow = NSStackView(views: [flipXCheck, monitorBtn])
+        let axesRow = NSStackView(views: [enableXCheck, enableYCheck])
+        axesRow.orientation = .horizontal
+        axesRow.spacing = 14
+
+        let bottomRow = NSStackView(views: [flipXCheck, flipYCheck, monitorBtn])
         bottomRow.orientation = .horizontal
         bottomRow.spacing = 14
         monitorBtn.widthAnchor.constraint(equalToConstant: 100).isActive = true
@@ -320,7 +334,7 @@ final class ControlPanel: NSWindow {
 
         let root = NSStackView(views: [
             header, padView, readoutLabel,
-            tools, tune, devicesBox, bottomRow
+            tools, tune, axesRow, devicesBox, bottomRow
         ])
         root.orientation = .vertical
         root.alignment = .leading

@@ -33,6 +33,19 @@ struct Settings: Codable {
     /// only ever moves within the measured sweep, never outside it.
     var rangeCenter: Int = 0
 
+    /// Y axis — its own fields, entirely separate from the X ones above, so
+    /// nothing about X's calibration or behavior is touched by any of this.
+    var flipY: Bool = false
+    var axisMappedY: Bool = false
+    var axisTop: Double = 0
+    var axisBottom: Double = 0
+    var screenBoundTop: Double = 0
+    var screenBoundBottom: Double = 1
+    /// Independent on/off for each axis, so you can isolate one to test/tune
+    /// it without the other moving the ball at all. Both default on.
+    var enableX: Bool = true
+    var enableY: Bool = true
+
     private enum CodingKeys: String, CodingKey {
         case shift = "Shift"
         case flipX = "FlipX"
@@ -45,6 +58,14 @@ struct Settings: Codable {
         case mouseSpeed = "MouseSpeed"
         case rangeScale = "RangeScale"
         case rangeCenter = "RangeCenter"
+        case flipY = "FlipY"
+        case axisMappedY = "AxisMappedY"
+        case axisTop = "AxisTop"
+        case axisBottom = "AxisBottom"
+        case screenBoundTop = "ScreenBoundTop"
+        case screenBoundBottom = "ScreenBoundBottom"
+        case enableX = "EnableX"
+        case enableY = "EnableY"
     }
 
     init() {}
@@ -66,6 +87,14 @@ struct Settings: Codable {
         mouseSpeed = try c.decodeIfPresent(Int.self, forKey: .mouseSpeed) ?? 0
         rangeScale = try c.decodeIfPresent(Int.self, forKey: .rangeScale) ?? 100
         rangeCenter = try c.decodeIfPresent(Int.self, forKey: .rangeCenter) ?? 0
+        flipY = try c.decodeIfPresent(Bool.self, forKey: .flipY) ?? false
+        axisMappedY = try c.decodeIfPresent(Bool.self, forKey: .axisMappedY) ?? false
+        axisTop = try c.decodeIfPresent(Double.self, forKey: .axisTop) ?? 0
+        axisBottom = try c.decodeIfPresent(Double.self, forKey: .axisBottom) ?? 0
+        screenBoundTop = try c.decodeIfPresent(Double.self, forKey: .screenBoundTop) ?? 0
+        screenBoundBottom = try c.decodeIfPresent(Double.self, forKey: .screenBoundBottom) ?? 1
+        enableX = try c.decodeIfPresent(Bool.self, forKey: .enableX) ?? true
+        enableY = try c.decodeIfPresent(Bool.self, forKey: .enableY) ?? true
     }
 
     static var fileURL: URL {
@@ -85,6 +114,11 @@ struct Settings: Codable {
         loaded.screenBoundRight = clamp(loaded.screenBoundRight, 0, 1)
         if loaded.screenBoundRight < loaded.screenBoundLeft {
             swap(&loaded.screenBoundLeft, &loaded.screenBoundRight)
+        }
+        loaded.screenBoundTop = clamp(loaded.screenBoundTop, 0, 1)
+        loaded.screenBoundBottom = clamp(loaded.screenBoundBottom, 0, 1)
+        if loaded.screenBoundBottom < loaded.screenBoundTop {
+            swap(&loaded.screenBoundTop, &loaded.screenBoundBottom)
         }
         return loaded
     }

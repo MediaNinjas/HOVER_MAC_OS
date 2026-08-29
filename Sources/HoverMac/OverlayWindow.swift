@@ -32,8 +32,11 @@ final class OverlayWindow: NSWindow {
 }
 
 final class OverlayView: NSView {
-    // Normalized 0..1 state, same semantics as the Windows Edges control.
+    // Normalized 0..1 state.
     var ballX: Double = 0.5
+    /// Y position, top-left origin (0 = top, 1 = bottom) matching `isFlipped`
+    /// below — separate from ballX, doesn't affect X drawing at all.
+    var ballY: Double = 0.5
     var boundL: Double = 0
     var boundR: Double = 1
     var prompt: String?
@@ -73,7 +76,7 @@ final class OverlayView: NSView {
 
         // Ball.
         let bx = CGFloat(ballX) * w
-        let by = h / 2
+        let by = CGFloat(ballY) * h
         ctx.setFillColor(tron.cgColor)
         ctx.fillEllipse(in: CGRect(x: bx - 7, y: by - 7, width: 14, height: 14))
 
