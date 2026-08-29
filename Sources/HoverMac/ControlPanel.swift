@@ -247,10 +247,11 @@ final class ControlPanel: NSWindow {
     init() {
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 460, height: 760),
-            styleMask: [.titled, .closable, .miniaturizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
+        minSize = NSSize(width: 460, height: 400)
         title = "HOVER"
         isReleasedWhenClosed = false
         backgroundColor = .black
@@ -405,11 +406,25 @@ final class ControlPanel: NSWindow {
             section.widthAnchor.constraint(equalToConstant: 420).isActive = true
         }
 
-        content.addSubview(root)
+        // Scrollable so a fixed/resized window height can never silently clip
+        // content off the bottom with no way to reach it — this exact thing
+        // happened once already (RECORD buttons rendered below the visible
+        // window, invisible, on a non-resizable fixed-height window).
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.documentView = root
+        content.addSubview(scrollView)
         NSLayoutConstraint.activate([
-            root.topAnchor.constraint(equalTo: content.topAnchor),
-            root.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            root.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor)
+            scrollView.topAnchor.constraint(equalTo: content.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            root.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+            root.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+            root.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor)
         ])
     }
 
