@@ -199,17 +199,23 @@ final class MidiSensor {
                     // X/Y-specific branches below at all, purely observational.
                     rawCCs[cc] = value
                     DispatchQueue.main.async { [weak self] in self?.onRawCC?(cc, value) }
-                    // Hot Hand: CC 4/7/9 = X. CC 5/8 = Y. Handled as two fully
-                    // separate branches, each firing only its own callback —
-                    // an X sample never touches lastY/onSampleY or vice versa.
-                    if cc == 4 || cc == 7 || cc == 9 {
+                    // Hot Hand: CC 4/7 = X, CC 9 = Y — confirmed against the
+                    // real hardware directly (user reported CC9 as what
+                    // actually moves for the up/down gesture). CC9 used to be
+                    // lumped into the X group, which is exactly why moving
+                    // vertically also dragged X diagonally: it was feeding
+                    // both. CC 5/8 were never confirmed against real hardware
+                    // and are left unassigned. Handled as two fully separate
+                    // branches, each firing only its own callback — an X
+                    // sample never touches lastY/onSampleY or vice versa.
+                    if cc == 4 || cc == 7 {
                         lastX = value
                         lastSampleAt = Date()
                         DispatchQueue.main.async { [weak self] in
                             guard let self else { return }
                             self.onSample?(self.lastX)
                         }
-                    } else if cc == 5 || cc == 8 {
+                    } else if cc == 9 {
                         lastY = value
                         lastSampleAt = Date()
                         DispatchQueue.main.async { [weak self] in
