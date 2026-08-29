@@ -36,6 +36,13 @@ final class MidiSensor {
     private(set) var lastY: Int = 64
     var onSample: ((Int) -> Void)?
     var onSampleY: ((Int) -> Void)?
+    /// Every CC the hardware sends, by number — separate from and in addition
+    /// to the X/Y-specific handling above, which is untouched. Lets the app
+    /// show live values for CCs nobody's specifically wired up yet, so a
+    /// third physical axis (or any other control) can be identified by eye
+    /// instead of guessed at in code.
+    private(set) var rawCCs: [Int: Int] = [:]
+    var onRawCC: ((Int, Int) -> Void)?
     /// Fires whenever the device list or any device's enabled state changes, so the
     /// UI can rebuild the DEVICES checkbox list.
     var onDevicesChanged: (() -> Void)?
@@ -188,6 +195,10 @@ final class MidiSensor {
                 if (status & 0xF0) == 0xB0 {
                     let cc = Int(bytes[i + 1])
                     let value = Int(bytes[i + 2])
+                    // Unconditional, for every CC — doesn't alter or gate the
+                    // X/Y-specific branches below at all, purely observational.
+                    rawCCs[cc] = value
+                    DispatchQueue.main.async { [weak self] in self?.onRawCC?(cc, value) }
                     // Hot Hand: CC 4/7/9 = X. CC 5/8 = Y. Handled as two fully
                     // separate branches, each firing only its own callback —
                     // an X sample never touches lastY/onSampleY or vice versa.

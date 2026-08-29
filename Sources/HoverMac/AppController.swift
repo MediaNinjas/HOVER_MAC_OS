@@ -66,6 +66,12 @@ final class AppController: NSObject, NSWindowDelegate {
     private var autoLegStartY = 0.0
     private var autoPassesY = 0
 
+    /// Every raw CC the hardware is currently sending, mirrored from
+    /// `sensor.onRawCC` — purely observational, doesn't feed X or Y unless
+    /// `settings.xSourceCC`/`ySourceCC` explicitly picks one of these.
+    private var rawCCs: [Int: Int] = [:]
+    private var lastKnownCCSet: Set<Int> = []
+
     // MIDI reconnect throttle — retry every 2s while disconnected, not every tick.
     private var nextConnectAttempt = Date.distantPast
 
@@ -81,6 +87,20 @@ final class AppController: NSObject, NSWindowDelegate {
     var hasXMap: Bool { settings.axisMapped && abs(settings.axisRight - settings.axisLeft) >= 6 }
     var hasYMap: Bool { settings.axisMappedY && abs(settings.axisBottom - settings.axisTop) >= 6 }
 
+    /// The value actually fed to X's pipeline this tick — `rawX` (the normal
+    /// grouped CC4/7/9 union) unless `xSourceCC` overrides it to one specific
+    /// raw CC. Falls back to `rawX` if that CC hasn't been seen yet, so an
+    /// unset/stale override can't leave X stuck at 0.
+    private func rawValueForX() -> Int {
+        if let cc = settings.xSourceCC, let v = rawCCs[cc] { return v }
+        return rawX
+    }
+
+    private func rawValueForY() -> Int {
+        if let cc = settings.ySourceCC, let v = rawCCs[cc] { return v }
+        return rawY
+    }
+
     func start() {
         yellowL = clamp(settings.screenBoundLeft, 0, 1)
         yellowR = clamp(settings.screenBoundRight, 0, 1)
@@ -95,6 +115,7 @@ final class AppController: NSObject, NSWindowDelegate {
 
         sensor.onSample = { [weak self] x in self?.rawX = x }
         sensor.onSampleY = { [weak self] y in self?.rawY = y }
+        sensor.onRawCC = { [weak self] cc, value in self?.rawCCs[cc] = value }
         sensor.onDevicesChanged = { [weak self] in
             guard let self else { return }
             panel.setDevices(sensor.devices)
@@ -168,6 +189,12 @@ final class AppController: NSObject, NSWindowDelegate {
         panel.enableXCheck.action = #selector(onEnableXChanged)
         panel.enableYCheck.target = self
         panel.enableYCheck.action = #selector(onEnableYChanged)
+        panel.enableZCheck.target = self
+        panel.enableZCheck.action = #selector(onEnableZChanged)
+        panel.xSourceMenu.target = self
+        panel.xSourceMenu.action = #selector(onXSourceChanged)
+        panel.ySourceMenu.target = self
+        panel.ySourceMenu.action = #selector(onYSourceChanged)
         panel.rescanBtn.target = self
         panel.rescanBtn.action = #selector(onRescanTapped)
         panel.onDeviceToggled = { [weak self] name, enabled in
@@ -186,6 +213,8 @@ final class AppController: NSObject, NSWindowDelegate {
         panel.flipYCheck.state = settings.flipY ? .on : .off
         panel.enableXCheck.state = settings.enableX ? .on : .off
         panel.enableYCheck.state = settings.enableY ? .on : .off
+        panel.enableZCheck.state = settings.enableZ ? .on : .off
+        panel.setSourceOptions([], selectedX: settings.xSourceCC, selectedY: settings.ySourceCC)
 
         panel.mouseSpeedSlider.target = self; panel.mouseSpeedSlider.action = #selector(onMouseSpeedChanged)
         panel.shiftSlider.target = self; panel.shiftSlider.action = #selector(onShiftChanged)
@@ -243,6 +272,25 @@ final class AppController: NSObject, NSWindowDelegate {
     @objc private func onEnableYChanged() {
         settings.enableY = panel.enableYCheck.state == .on
         if !settings.enableY { py = 0.5 }
+        settings.save()
+    }
+
+    /// Z isn't wired to anything on screen — enabling it just starts showing
+    /// its raw value in the SOURCES monitor so its CC can be identified.
+    @objc private func onEnableZChanged() {
+        settings.enableZ = panel.enableZCheck.state == .on
+        settings.save()
+    }
+
+    @objc private func onXSourceChanged() {
+        let tag = panel.xSourceMenu.selectedItem?.tag ?? -1
+        settings.xSourceCC = tag == -1 ? nil : tag
+        settings.save()
+    }
+
+    @objc private func onYSourceChanged() {
+        let tag = panel.ySourceMenu.selectedItem?.tag ?? -1
+        settings.ySourceCC = tag == -1 ? nil : tag
         settings.save()
     }
 
@@ -391,13 +439,13 @@ final class AppController: NSObject, NSWindowDelegate {
             return
         }
         autoRanging = true
-        autoMin = horizontalOf(rawX)
+        autoMin = horizontalOf(rawValueForX())
         autoMax = autoMin
         autoLast = autoMin
         autoDir = 0
         autoLegStart = autoMin
         autoPasses = 0
-        autoMinY = verticalOf(rawY)
+        autoMinY = verticalOf(rawValueForY())
         autoMaxY = autoMinY
         autoLastY = autoMinY
         autoDirY = 0
@@ -420,7 +468,7 @@ final class AppController: NSObject, NSWindowDelegate {
         var grew = false
 
         if settings.enableX {
-            let midi = horizontalOf(rawX)
+            let midi = horizontalOf(rawValueForX())
             if midi < autoMin { autoMin = midi; grew = true }
             if midi > autoMax { autoMax = midi; grew = true }
 
@@ -443,7 +491,7 @@ final class AppController: NSObject, NSWindowDelegate {
         }
 
         if settings.enableY {
-            let midi = verticalOf(rawY)
+            let midi = verticalOf(rawValueForY())
             if midi < autoMinY { autoMinY = midi; grew = true }
             if midi > autoMaxY { autoMaxY = midi; grew = true }
 
@@ -540,8 +588,8 @@ final class AppController: NSObject, NSWindowDelegate {
         // No re-adjustment of any kind after this — what AUTO measured is what
         // gets used, permanently, until you run AUTO again. Per direct
         // instruction: nothing pulls on the mapping after it's set.
-        if lockedX { map(rawX) }
-        if lockedY { mapY(rawY) }
+        if lockedX { map(rawValueForX()) }
+        if lockedY { mapY(rawValueForY()) }
         var parts: [String] = []
         if lockedX { parts.append("X \(Int(lockedXLeft))-\(Int(lockedXRight))") }
         if lockedY { parts.append("Y \(Int(lockedYTop))-\(Int(lockedYBottom))") }
@@ -564,6 +612,7 @@ final class AppController: NSObject, NSWindowDelegate {
 
         if autoRanging {
             sampleAuto()
+            refreshSourceOptionsIfNeeded()
             showStatus()
             refreshOverlay()
             return
@@ -575,12 +624,28 @@ final class AppController: NSObject, NSWindowDelegate {
         // set px/py during live tracking, full stop. A disabled axis is
         // pinned to center instead of being left at whatever it last was.
         if !muted {
-            if settings.enableX { map(rawX) } else { px = 0.5 }
-            if settings.enableY { mapY(rawY) } else { py = 0.5 }
+            if settings.enableX { map(rawValueForX()) } else { px = 0.5 }
+            if settings.enableY { mapY(rawValueForY()) } else { py = 0.5 }
         }
 
+        refreshSourceOptionsIfNeeded()
         showStatus()
         refreshOverlay()
+    }
+
+    // MARK: - Sources (raw CC monitor / assignment)
+
+    /// Only rebuilds the popup menus when the set of seen CCs actually
+    /// changed, and always refreshes the live "CCn:value" text — cheap
+    /// enough to call every tick.
+    private func refreshSourceOptionsIfNeeded() {
+        let ccSet = Set(rawCCs.keys)
+        if ccSet != lastKnownCCSet {
+            lastKnownCCSet = ccSet
+            panel.setSourceOptions(ccSet.sorted(), selectedX: settings.xSourceCC, selectedY: settings.ySourceCC)
+        }
+        let text = rawCCs.sorted { $0.key < $1.key }.map { "CC\($0.key):\($0.value)" }.joined(separator: "  ")
+        panel.setRawCCText(text.isEmpty ? "no raw CC traffic yet" : text)
     }
 
     // MARK: - Status / overlay

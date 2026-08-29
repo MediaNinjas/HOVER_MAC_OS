@@ -45,6 +45,19 @@ struct Settings: Codable {
     /// it without the other moving the ball at all. Both default on.
     var enableX: Bool = true
     var enableY: Bool = true
+    /// A third raw channel, tracked/shown but not driving anything on screen
+    /// by itself — enabling it just makes its live value visible in the raw
+    /// CC monitor so it can be identified and, if useful, assigned to X or Y
+    /// below.
+    var enableZ: Bool = false
+    /// Which raw MIDI CC number actually feeds each screen axis. nil (the
+    /// default for both) means "use the normal built-in grouping" — X's
+    /// CC 4/7/9 union, Y's CC 5/8 union, exactly as before. Setting either to
+    /// a specific CC overrides that axis to read from exactly that one CC
+    /// instead — e.g. to put a more comfortable gesture's CC onto Y instead
+    /// of the default one. Picked from the live raw CC monitor, not guessed.
+    var xSourceCC: Int? = nil
+    var ySourceCC: Int? = nil
 
     private enum CodingKeys: String, CodingKey {
         case shift = "Shift"
@@ -66,6 +79,9 @@ struct Settings: Codable {
         case screenBoundBottom = "ScreenBoundBottom"
         case enableX = "EnableX"
         case enableY = "EnableY"
+        case enableZ = "EnableZ"
+        case xSourceCC = "XSourceCC"
+        case ySourceCC = "YSourceCC"
     }
 
     init() {}
@@ -95,6 +111,9 @@ struct Settings: Codable {
         screenBoundBottom = try c.decodeIfPresent(Double.self, forKey: .screenBoundBottom) ?? 1
         enableX = try c.decodeIfPresent(Bool.self, forKey: .enableX) ?? true
         enableY = try c.decodeIfPresent(Bool.self, forKey: .enableY) ?? true
+        enableZ = try c.decodeIfPresent(Bool.self, forKey: .enableZ) ?? false
+        xSourceCC = try c.decodeIfPresent(Int.self, forKey: .xSourceCC)
+        ySourceCC = try c.decodeIfPresent(Int.self, forKey: .ySourceCC)
     }
 
     static var fileURL: URL {

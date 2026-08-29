@@ -202,6 +202,18 @@ final class ControlPanel: NSWindow {
     /// it alone without the other axis moving the ball at all.
     let enableXCheck = NSButton(checkboxWithTitle: "ENABLE X", target: nil, action: nil)
     let enableYCheck = NSButton(checkboxWithTitle: "ENABLE Y", target: nil, action: nil)
+    /// Tracks a third raw channel for the monitor below — doesn't drive
+    /// anything on screen by itself.
+    let enableZCheck = NSButton(checkboxWithTitle: "ENABLE Z", target: nil, action: nil)
+
+    /// Which raw MIDI CC drives each screen axis — populated live from
+    /// whatever CCs the hardware is actually sending, via `setSourceOptions`.
+    /// "Default" keeps the normal built-in grouping.
+    let xSourceMenu = NSPopUpButton()
+    let ySourceMenu = NSPopUpButton()
+    /// Every raw CC number and its current value, refreshed live — lets a
+    /// gesture be matched to its CC number by eye, no code changes needed.
+    let rawCCLabel = NSTextField(labelWithString: "")
 
     let shiftSlider = NSSlider(value: 0, minValue: -50, maxValue: 50, target: nil, action: nil)
     /// Per-tick rate cap only — never a range multiplier. See Settings.mouseSpeed.
@@ -224,7 +236,7 @@ final class ControlPanel: NSWindow {
 
     init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 620),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 760),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -311,8 +323,9 @@ final class ControlPanel: NSWindow {
         enableXCheck.state = .on
         enableYCheck.attributedTitle = checkboxTitle("ENABLE Y")
         enableYCheck.state = .on
+        enableZCheck.attributedTitle = checkboxTitle("ENABLE Z")
 
-        let axesRow = NSStackView(views: [enableXCheck, enableYCheck])
+        let axesRow = NSStackView(views: [enableXCheck, enableYCheck, enableZCheck])
         axesRow.orientation = .horizontal
         axesRow.spacing = 14
 
@@ -320,6 +333,37 @@ final class ControlPanel: NSWindow {
         bottomRow.orientation = .horizontal
         bottomRow.spacing = 14
         monitorBtn.widthAnchor.constraint(equalToConstant: 100).isActive = true
+
+        // SOURCES — which raw MIDI CC actually drives each screen axis, plus
+        // a live readout of every CC number the hardware sends, so a natural
+        // gesture's CC can be spotted and assigned without guessing.
+        let sources = SectionBox("SOURCES")
+        xSourceMenu.font = mono(10)
+        ySourceMenu.font = mono(10)
+        xSourceMenu.widthAnchor.constraint(equalToConstant: 130).isActive = true
+        ySourceMenu.widthAnchor.constraint(equalToConstant: 130).isActive = true
+        let xSourceLabel = NSTextField(labelWithString: "X Source")
+        xSourceLabel.font = mono(10); xSourceLabel.textColor = Neon.dimCyan
+        xSourceLabel.widthAnchor.constraint(equalToConstant: 60).isActive = true
+        let ySourceLabel = NSTextField(labelWithString: "Y Source")
+        ySourceLabel.font = mono(10); ySourceLabel.textColor = Neon.dimCyan
+        ySourceLabel.widthAnchor.constraint(equalToConstant: 60).isActive = true
+        rawCCLabel.font = mono(9)
+        rawCCLabel.textColor = Neon.dimCyan
+        rawCCLabel.lineBreakMode = .byWordWrapping
+        rawCCLabel.maximumNumberOfLines = 3
+        rawCCLabel.preferredMaxLayoutWidth = 380
+        let sourcesStack = NSStackView(views: [
+            NSStackView(views: [xSourceLabel, xSourceMenu]),
+            NSStackView(views: [ySourceLabel, ySourceMenu]),
+            rawCCLabel
+        ])
+        sourcesStack.orientation = .vertical
+        sourcesStack.alignment = .leading
+        sourcesStack.spacing = 6
+        sources.body.orientation = .vertical
+        sources.body.distribution = .fill
+        sources.body.addArrangedSubview(sourcesStack)
 
         // DEVICES — every MIDI source CoreMIDI sees, each with its own on/off
         // checkbox, plus a manual rescan. Rebuilt live via `setDevices`.
@@ -334,7 +378,7 @@ final class ControlPanel: NSWindow {
 
         let root = NSStackView(views: [
             header, padView, readoutLabel,
-            tools, tune, axesRow, devicesBox, bottomRow
+            tools, tune, axesRow, sources, devicesBox, bottomRow
         ])
         root.orientation = .vertical
         root.alignment = .leading
@@ -342,7 +386,7 @@ final class ControlPanel: NSWindow {
         root.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 16, right: 20)
         root.translatesAutoresizingMaskIntoConstraints = false
 
-        for section in [tools, tune, devicesBox] {
+        for section in [tools, tune, sources, devicesBox] {
             section.translatesAutoresizingMaskIntoConstraints = false
             section.widthAnchor.constraint(equalToConstant: 420).isActive = true
         }
@@ -378,6 +422,31 @@ final class ControlPanel: NSWindow {
             devicesBox.body.addArrangedSubview(row)
             deviceRows.append(row)
         }
+    }
+
+    /// Rebuilds both source popups to list "Default" plus every CC number
+    /// currently being seen — called whenever a new CC shows up. `tag` on
+    /// each item carries the CC number, -1 for "Default", so the caller can
+    /// read the selection without parsing title strings.
+    func setSourceOptions(_ ccs: [Int], selectedX: Int?, selectedY: Int?) {
+        for (menu, selected) in [(xSourceMenu, selectedX), (ySourceMenu, selectedY)] {
+            menu.removeAllItems()
+            menu.addItem(withTitle: "Default")
+            menu.lastItem?.tag = -1
+            for cc in ccs {
+                menu.addItem(withTitle: "CC \(cc)")
+                menu.lastItem?.tag = cc
+            }
+            let wantTag = selected ?? -1
+            if let item = menu.itemArray.first(where: { $0.tag == wantTag }) {
+                menu.select(item)
+            }
+        }
+    }
+
+    /// Live "CC n:value" readout for every raw CC the hardware is sending.
+    func setRawCCText(_ text: String) {
+        rawCCLabel.stringValue = text
     }
 }
 
