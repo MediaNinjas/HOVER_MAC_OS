@@ -57,14 +57,13 @@ final class AppController: NSObject, NSWindowDelegate {
     private var autoLegStart = 0.0
     private var autoPasses = 0
     private var autoStableUntil = Date.distantPast
-    // AUTO ranging — Y. Same shape as the X fields above, sampled/locked
-    // completely separately.
+    // AUTO ranging — Y. Deliberately simpler than X's: no pass-counting, no
+    // ambiguity about when it's done — just a plain countdown. Whatever
+    // range is covered by the time it hits zero gets locked, full stop.
     private var autoMinY = 127.0
     private var autoMaxY = 0.0
-    private var autoLastY = 0.0
-    private var autoDirY = 0
-    private var autoLegStartY = 0.0
-    private var autoPassesY = 0
+    private var autoDeadlineY = Date.distantPast
+    private let autoDurationY: TimeInterval = 8.0
 
     /// Every raw CC the hardware is currently sending, mirrored from
     /// `sensor.onRawCC` — purely observational, doesn't feed X or Y unless
@@ -528,11 +527,12 @@ final class AppController: NSObject, NSWindowDelegate {
         autoPasses = 0
         autoMinY = verticalOf(rawValueForY())
         autoMaxY = autoMinY
-        autoLastY = autoMinY
-        autoDirY = 0
-        autoLegStartY = autoMinY
-        autoPassesY = 0
         autoStableUntil = Date().addingTimeInterval(1.1)
+        // Y doesn't use pass-counting at all — just a plain, visible
+        // countdown. Whatever range you cover in that window, however small,
+        // gets locked to the full top/bottom the moment it hits zero. No
+        // ambiguity about when it's "done."
+        autoDeadlineY = Date().addingTimeInterval(autoDurationY)
         panel.autoBtn.title = "CANCEL"
         show("AUTO · sweep enabled axes, enter to lock")
     }
@@ -572,23 +572,11 @@ final class AppController: NSObject, NSWindowDelegate {
         }
 
         if settings.enableY {
+            // Just track the range — no pass-counting, no ambiguity about
+            // whether it's "enough." The countdown alone decides when Y locks.
             let midi = verticalOf(rawValueForY())
-            if midi < autoMinY { autoMinY = midi; grew = true }
-            if midi > autoMaxY { autoMaxY = midi; grew = true }
-
-            let delta = midi - autoLastY
-            if abs(delta) >= 1.5 {
-                let dir = delta < 0 ? -1 : 1
-                if autoDirY == 0 {
-                    autoDirY = dir
-                    autoLegStartY = midi
-                } else if dir != autoDirY && abs(autoLastY - autoLegStartY) >= EdgeSolve.minMidiSpanY / 2 {
-                    autoPassesY += 1
-                    autoDirY = dir
-                    autoLegStartY = autoLastY
-                }
-                autoLastY = midi
-            }
+            if midi < autoMinY { autoMinY = midi }
+            if midi > autoMaxY { autoMaxY = midi }
 
             let spanY = autoMaxY - autoMinY
             py = spanY < 1 ? 0.5 : clamp((midi - autoMinY) / spanY, 0, 1)
@@ -600,7 +588,7 @@ final class AppController: NSObject, NSWindowDelegate {
         // entirely, both for sampling requirements and for what finishAuto
         // ends up writing.
         let xReady = !settings.enableX || (autoPasses >= EdgeSolve.minPasses && (autoMax - autoMin) >= EdgeSolve.minMidiSpan)
-        let yReady = !settings.enableY || (autoPassesY >= EdgeSolve.minPasses && (autoMaxY - autoMinY) >= EdgeSolve.minMidiSpanY)
+        let yReady = !settings.enableY || Date() >= autoDeadlineY
         if xReady && yReady && Date() >= autoStableUntil {
             finishAuto(force: false)
         }
@@ -625,13 +613,16 @@ final class AppController: NSObject, NSWindowDelegate {
         }
 
         if settings.enableY {
-            let result = EdgeSolve.trySweep(midiMin: autoMinY, midiMax: autoMaxY, passes: autoPassesY, force: force, minSpan: EdgeSolve.minMidiSpanY)
-            if let err = result.err {
-                show("Y: \(err)")
+            // No pass requirement — the countdown itself is the only gate.
+            // Whatever range was covered in that window locks, however small,
+            // as long as it's not literally zero movement.
+            if autoMaxY - autoMinY < 1 {
+                show("Y: no movement detected — try again")
+                cancelAuto()
                 return
             }
-            lockedYTop = result.axisLeft
-            lockedYBottom = result.axisRight
+            lockedYTop = autoMinY
+            lockedYBottom = autoMaxY
             lockedY = true
         }
 
@@ -833,7 +824,13 @@ final class AppController: NSObject, NSWindowDelegate {
             self.notice = nil
             if !sensor.connected { panel.statusLabel.stringValue = sensor.status }
             else if autoRanging {
-                panel.statusLabel.stringValue = "AUTO · X \(autoPasses)/\(EdgeSolve.minPasses)  Y \(autoPassesY)/\(EdgeSolve.minPasses)"
+                var parts: [String] = []
+                if settings.enableX { parts.append("X \(autoPasses)/\(EdgeSolve.minPasses) passes") }
+                if settings.enableY {
+                    let secsLeft = max(0, Int(ceil(autoDeadlineY.timeIntervalSinceNow)))
+                    parts.append("Y locks in \(secsLeft)s")
+                }
+                panel.statusLabel.stringValue = "AUTO · " + parts.joined(separator: "  ")
             }
             else if detectPhase == .horizontal { panel.statusLabel.stringValue = "FIND AXES · move LEFT-RIGHT" }
             else if detectPhase == .vertical { panel.statusLabel.stringValue = "FIND AXES · move UP-DOWN" }
