@@ -216,6 +216,11 @@ final class ControlPanel: NSWindow {
     let detectBtn = NeonButton(title: "FIND AXES")
     /// Quick fix if FIND AXES (or a manual pick) comes out backwards.
     let swapBtn = NeonButton(title: "SWAP X/Y")
+    /// Records just one axis: press it, do the gesture you want for that
+    /// axis, and whichever raw CC moved most during that window is assigned.
+    /// Leaves the other axis's source completely alone.
+    let recordXBtn = NeonButton(title: "RECORD")
+    let recordYBtn = NeonButton(title: "RECORD")
     /// Every raw CC number and its current value, refreshed live — lets a
     /// gesture be matched to its CC number by eye, no code changes needed.
     let rawCCLabel = NSTextField(labelWithString: "")
@@ -363,8 +368,8 @@ final class ControlPanel: NSWindow {
         rawCCLabel.preferredMaxLayoutWidth = 380
         let sourcesStack = NSStackView(views: [
             detectRow,
-            NSStackView(views: [xSourceLabel, xSourceMenu]),
-            NSStackView(views: [ySourceLabel, ySourceMenu]),
+            NSStackView(views: [xSourceLabel, xSourceMenu, recordXBtn]),
+            NSStackView(views: [ySourceLabel, ySourceMenu, recordYBtn]),
             rawCCLabel
         ])
         sourcesStack.orientation = .vertical

@@ -75,7 +75,10 @@ final class AppController: NSObject, NSWindowDelegate {
     /// FIND AXES: walks the user through one deliberate horizontal sweep,
     /// then one deliberate vertical sweep, and assigns whichever raw CC moved
     /// the most during each window — no MIDI/CC knowledge required from them.
-    private enum DetectPhase { case idle, horizontal, vertical }
+    /// horizontal/vertical chain together (FIND AXES); recordX/recordY are
+    /// standalone single-axis captures (the per-axis RECORD buttons) that
+    /// only ever touch that one axis's source.
+    private enum DetectPhase { case idle, horizontal, vertical, recordX, recordY }
     private var detectPhase: DetectPhase = .idle
     private var detectPhaseStart = Date.distantPast
     private var detectRanges: [Int: (min: Double, max: Double)] = [:]
@@ -211,6 +214,10 @@ final class AppController: NSObject, NSWindowDelegate {
         panel.detectBtn.action = #selector(onDetectTapped)
         panel.swapBtn.target = self
         panel.swapBtn.action = #selector(onSwapTapped)
+        panel.recordXBtn.target = self
+        panel.recordXBtn.action = #selector(onRecordXTapped)
+        panel.recordYBtn.target = self
+        panel.recordYBtn.action = #selector(onRecordYTapped)
         panel.rescanBtn.target = self
         panel.rescanBtn.action = #selector(onRescanTapped)
         panel.onDeviceToggled = { [weak self] name, enabled in
@@ -321,9 +328,7 @@ final class AppController: NSObject, NSWindowDelegate {
 
     @objc private func onDetectTapped() {
         if detectPhase != .idle {
-            detectPhase = .idle
-            panel.detectBtn.title = "FIND AXES"
-            showStatus()
+            cancelDetect()
             return
         }
         guard sensor.connected else { return }
@@ -333,6 +338,38 @@ final class AppController: NSObject, NSWindowDelegate {
         detectRanges = [:]
         panel.detectBtn.title = "CANCEL"
         show("FIND AXES · move hand LEFT-RIGHT now")
+    }
+
+    /// Records just Y (or just X below): press it, do the one gesture you
+    /// want for that axis, done — the other axis's source is never touched.
+    @objc private func onRecordYTapped() {
+        if detectPhase == .recordY { cancelDetect(); return }
+        guard sensor.connected, detectPhase == .idle else { return }
+        if autoRanging { cancelAuto() }
+        detectPhase = .recordY
+        detectPhaseStart = Date()
+        detectRanges = [:]
+        panel.recordYBtn.title = "..."
+        show("RECORD Y · do the gesture you want now")
+    }
+
+    @objc private func onRecordXTapped() {
+        if detectPhase == .recordX { cancelDetect(); return }
+        guard sensor.connected, detectPhase == .idle else { return }
+        if autoRanging { cancelAuto() }
+        detectPhase = .recordX
+        detectPhaseStart = Date()
+        detectRanges = [:]
+        panel.recordXBtn.title = "..."
+        show("RECORD X · do the gesture you want now")
+    }
+
+    private func cancelDetect() {
+        detectPhase = .idle
+        panel.detectBtn.title = "FIND AXES"
+        panel.recordXBtn.title = "RECORD"
+        panel.recordYBtn.title = "RECORD"
+        showStatus()
     }
 
     @objc private func onMuteTapped() { toggleMute() }
@@ -718,20 +755,22 @@ final class AppController: NSObject, NSWindowDelegate {
         }
         guard Date().timeIntervalSince(detectPhaseStart) >= detectDuration else { return }
 
-        // While picking Y, ignore whatever CC just won X — a real second axis
-        // should win on its own merits, not by riding X's already-large swing.
+        // While picking Y in the FIND AXES chain, ignore whatever CC just won
+        // X — a real second axis should win on its own merits, not by riding
+        // X's already-large swing. The standalone RECORD buttons don't chain,
+        // so nothing needs excluding there.
         let excluded = detectPhase == .vertical ? settings.xSourceCC : nil
         let winner = detectRanges
             .filter { $0.key != excluded }
             .max(by: { ($0.value.max - $0.value.min) < ($1.value.max - $1.value.min) })
         let swing = winner.map { $0.value.max - $0.value.min } ?? 0
+        let notEnoughMovement = winner == nil || swing < detectMinSwing
 
         switch detectPhase {
         case .horizontal:
-            guard let winner, swing >= detectMinSwing else {
+            guard !notEnoughMovement, let winner else {
                 show("FIND AXES · didn't see enough movement, try again")
-                detectPhase = .idle
-                panel.detectBtn.title = "FIND AXES"
+                cancelDetect()
                 return
             }
             settings.xSourceCC = winner.key
@@ -742,18 +781,38 @@ final class AppController: NSObject, NSWindowDelegate {
             detectRanges = [:]
             show("FIND AXES · now move hand UP-DOWN")
         case .vertical:
-            guard let winner, swing >= detectMinSwing else {
+            guard !notEnoughMovement, let winner else {
                 show("FIND AXES · didn't see enough movement, try again")
-                detectPhase = .idle
-                panel.detectBtn.title = "FIND AXES"
+                cancelDetect()
                 return
             }
             settings.ySourceCC = winner.key
             settings.save()
             resyncSourceMenus()
-            detectPhase = .idle
-            panel.detectBtn.title = "FIND AXES"
+            cancelDetect()
             show("FIND AXES · done — X=CC\(settings.xSourceCC.map(String.init) ?? "?") Y=CC\(winner.key)")
+        case .recordX:
+            guard !notEnoughMovement, let winner else {
+                show("RECORD X · didn't see enough movement, try again")
+                cancelDetect()
+                return
+            }
+            settings.xSourceCC = winner.key
+            settings.save()
+            resyncSourceMenus()
+            cancelDetect()
+            show("RECORD X · done — X=CC\(winner.key)")
+        case .recordY:
+            guard !notEnoughMovement, let winner else {
+                show("RECORD Y · didn't see enough movement, try again")
+                cancelDetect()
+                return
+            }
+            settings.ySourceCC = winner.key
+            settings.save()
+            resyncSourceMenus()
+            cancelDetect()
+            show("RECORD Y · done — Y=CC\(winner.key)")
         case .idle:
             break
         }
@@ -778,6 +837,8 @@ final class AppController: NSObject, NSWindowDelegate {
             }
             else if detectPhase == .horizontal { panel.statusLabel.stringValue = "FIND AXES · move LEFT-RIGHT" }
             else if detectPhase == .vertical { panel.statusLabel.stringValue = "FIND AXES · move UP-DOWN" }
+            else if detectPhase == .recordX { panel.statusLabel.stringValue = "RECORD X · do the gesture" }
+            else if detectPhase == .recordY { panel.statusLabel.stringValue = "RECORD Y · do the gesture" }
             else if muted { panel.statusLabel.stringValue = "MUTED" }
             else if !settings.enableX && !settings.enableY { panel.statusLabel.stringValue = "OFF" }
             else if (!settings.enableX || hasXMap) && (!settings.enableY || hasYMap) { panel.statusLabel.stringValue = "MAPPED" }
